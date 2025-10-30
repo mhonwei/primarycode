@@ -1,0 +1,21 @@
+# 示例 URL 列表 - 健康内容网络爬虫系统
+# 在自定义抓取模式中可以使用此文件
+# 每行一个 URL，# 开头的行为注释
+
+# 健康管理相关
+https://www.healthline.com/health/fitness-exercise-eating-healthy
+https://www.mayoclinic.org/healthy-lifestyle
+
+# 饮食营养相关
+https://www.nutrition.gov/topics/basic-nutrition
+https://www.eatright.org/food/nutrition
+
+# 疾病预防相关
+https://www.cdc.gov/prevention/index.html
+https://www.who.int/health-topics/disease-prevention
+
+# 运动健身相关
+https://www.acefitness.org/education-and-resources/lifestyle/blog/
+
+# 心理健康相关
+https://www.mentalhealth.gov/basics/what-is-mental-health
