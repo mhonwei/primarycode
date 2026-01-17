@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>教师管理端 - 电子教材实时更新系统</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: white;
+      border-radius: 12px;
+      padding: 20px 30px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    h1 {
+      color: #2d3748;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: #718096;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #48bb78;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .status-dot.disconnected {
+      background: #f56565;
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .main-content {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 20px;
+    }
+
+    .sidebar {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      height: fit-content;
+      max-height: calc(100vh - 140px);
+      overflow-y: auto;
+    }
+
+    .sidebar h2 {
+      color: #2d3748;
+      font-size: 18px;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+
+    .chapter-list {
+      list-style: none;
+    }
+
+    .chapter-item {
+      padding: 12px;
+      margin-bottom: 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+    }
+
+    .chapter-item:hover {
+      background: #f7fafc;
+      border-color: #cbd5e0;
+    }
+
+    .chapter-item.active {
+      background: #f5576c;
+      color: white;
+      border-color: #f5576c;
+    }
+
+    .add-chapter-btn {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 15px;
+      background: #48bb78;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+      font-weight: 600;
+    }
+
+    .add-chapter-btn:hover {
+      background: #38a169;
+    }
+
+    .editor-area {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      max-height: calc(100vh - 140px);
+      overflow-y: auto;
+    }
+
+    .editor-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+
+    .editor-header h2 {
+      color: #2d3748;
+      font-size: 24px;
+    }
+
+    .editor-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #f5576c;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #e04858;
+    }
+
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #2d3748;
+    }
+
+    .btn-secondary:hover {
+      background: #cbd5e0;
+    }
+
+    .content-blocks {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .content-block-editor {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 15px;
+      background: #f7fafc;
+    }
+
+    .block-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .block-type {
+      font-size: 12px;
+      color: #718096;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .block-actions {
+      display: flex;
+      gap: 5px;
+    }
+
+    .block-btn {
+      padding: 5px 10px;
+      font-size: 12px;
+      border: none;
+      background: #e2e8f0;
+      color: #4a5568;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .block-btn:hover {
+      background: #cbd5e0;
+    }
+
+    .block-btn.delete {
+      background: #fed7d7;
+      color: #c53030;
+    }
+
+    .block-btn.delete:hover {
+      background: #fc8181;
+      color: white;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 12px;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      resize: vertical;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: #f5576c;
+      box-shadow: 0 0 0 3px rgba(245, 87, 108, 0.1);
+    }
+
+    .add-block-section {
+      margin-top: 20px;
+      padding: 20px;
+      background: #edf2f7;
+      border-radius: 8px;
+    }
+
+    .add-block-section h3 {
+      font-size: 16px;
+      color: #2d3748;
+      margin-bottom: 15px;
+    }
+
+    .add-block-buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #a0aec0;
+    }
+
+    .empty-state-icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+    }
+
+    .empty-state h3 {
+      font-size: 20px;
+      margin-bottom: 10px;
+      color: #718096;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+    }
+
+    .success-notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #48bb78;
+      color: white;
+      padding: 15px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(72, 187, 120, 0.3);
+      display: none;
+      animation: slideIn 0.3s ease-out;
+      z-index: 1000;
+    }
+
+    .success-notification.show {
+      display: block;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #edf2f7;
+      color: #4a5568;
+      border-radius: 12px;
+      font-size: 11px;
+      margin-left: 8px;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal.show {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      max-width: 500px;
+      width: 90%;
+    }
+
+    .modal-content h3 {
+      margin-bottom: 20px;
+      color: #2d3748;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      color: #4a5568;
+      font-weight: 600;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #f5576c;
+      box-shadow: 0 0 0 3px rgba(245, 87, 108, 0.1);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>
+        <span>👨‍🏫</span>
+        教师管理端
+      </h1>
+      <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">已连接</span>
+      </div>
+    </header>
+
+    <div class="main-content">
+      <aside class="sidebar">
+        <h2>章节列表</h2>
+        <button class="add-chapter-btn" onclick="openAddChapterModal()">➕ 新增章节</button>
+        <ul class="chapter-list" id="chapterList">
+          <!-- 章节列表将动态加载 -->
+        </ul>
+      </aside>
+
+      <main class="editor-area" id="editorArea">
+        <div class="empty-state">
+          <div class="empty-state-icon">📝</div>
+          <h3>欢迎使用教师管理端</h3>
+          <p>请从左侧选择章节进行编辑,或新增章节</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="success-notification" id="successNotification">
+    <strong>✅ 操作成功!</strong>
+    <p id="successMessage"></p>
+  </div>
+
+  <!-- 新增章节模态框 -->
+  <div class="modal" id="addChapterModal">
+    <div class="modal-content">
+      <h3>新增章节</h3>
+      <div class="form-group">
+        <label for="chapterTitle">章节标题</label>
+        <input type="text" id="chapterTitle" placeholder="例如: 第四章：数组与对象">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeAddChapterModal()">取消</button>
+        <button class="btn btn-primary" onclick="createNewChapter()">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Socket.io 连接
+    const socket = io('http://localhost:3000');
+
+    // 全局状态
+    let currentTextbook = null;
+    let currentChapter = null;
+    let editingContent = [];
+
+    // 初始化
+    async function init() {
+      const textbooks = await fetch('http://localhost:3000/api/textbooks').then(r => r.json());
+      if (textbooks.length > 0) {
+        currentTextbook = textbooks[0];
+        loadTextbook(currentTextbook.id);
+      }
+    }
+
+    // 加载教材
+    async function loadTextbook(textbookId) {
+      const textbook = await fetch(`http://localhost:3000/api/textbooks/${textbookId}`).then(r => r.json());
+      currentTextbook = textbook;
+      renderChapterList(textbook.chapters);
+    }
+
+    // 渲染章节列表
+    function renderChapterList(chapters) {
+      const chapterList = document.getElementById('chapterList');
+      chapterList.innerHTML = chapters.map(chapter => `
+        <li class="chapter-item" onclick="editChapter('${chapter.id}')">
+          ${chapter.title}
+          <span class="badge">v${chapter.version}</span>
+        </li>
+      `).join('');
+    }
+
+    // 编辑章节
+    async function editChapter(chapterId) {
+      const chapter = await fetch(`http://localhost:3000/api/textbooks/${currentTextbook.id}/chapters/${chapterId}`).then(r => r.json());
+      currentChapter = chapter;
+      editingContent = JSON.parse(JSON.stringify(chapter.content)); // 深拷贝
+      renderEditor(chapter);
+
+      // 更新活动状态
+      document.querySelectorAll('.chapter-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      event.currentTarget.classList.add('active');
+    }
+
+    // 渲染编辑器
+    function renderEditor(chapter) {
+      const editorArea = document.getElementById('editorArea');
+
+      const blocksHTML = editingContent.map((block, index) => {
+        return `
+          <div class="content-block-editor">
+            <div class="block-header">
+              <span class="block-type">${block.type === 'text' ? '📄 文本内容' : '💻 代码块'}</span>
+              <div class="block-actions">
+                <button class="block-btn" onclick="moveBlockUp(${index})">↑</button>
+                <button class="block-btn" onclick="moveBlockDown(${index})">↓</button>
+                <button class="block-btn delete" onclick="deleteBlock(${index})">删除</button>
+              </div>
+            </div>
+            <textarea
+              id="block-${index}"
+              onchange="updateBlockContent(${index}, this.value)"
+            >${block.content}</textarea>
+          </div>
+        `;
+      }).join('');
+
+      editorArea.innerHTML = `
+        <div class="editor-header">
+          <h2>${chapter.title} <span class="badge">版本 ${chapter.version}</span></h2>
+          <div class="editor-actions">
+            <button class="btn btn-secondary" onclick="cancelEdit()">取消</button>
+            <button class="btn btn-primary" onclick="saveChapter()">💾 保存并推送</button>
+          </div>
+        </div>
+        <div class="content-blocks">
+          ${blocksHTML}
+        </div>
+        <div class="add-block-section">
+          <h3>添加内容块</h3>
+          <div class="add-block-buttons">
+            <button class="btn btn-secondary" onclick="addBlock('text')">➕ 添加文本</button>
+            <button class="btn btn-secondary" onclick="addBlock('code')">➕ 添加代码</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // 更新内容块
+    function updateBlockContent(index, content) {
+      editingContent[index].content = content;
+    }
+
+    // 添加内容块
+    function addBlock(type) {
+      const newBlock = {
+        id: `cb-${Date.now()}`,
+        type: type,
+        content: type === 'text' ? '# 新文本内容\n\n在此输入内容...' : '// 在此输入代码',
+        language: type === 'code' ? 'javascript' : undefined,
+        version: '1.0'
+      };
+      editingContent.push(newBlock);
+      renderEditor(currentChapter);
+    }
+
+    // 删除内容块
+    function deleteBlock(index) {
+      if (confirm('确定要删除这个内容块吗?')) {
+        editingContent.splice(index, 1);
+        renderEditor(currentChapter);
+      }
+    }
+
+    // 移动内容块
+    function moveBlockUp(index) {
+      if (index > 0) {
+        [editingContent[index], editingContent[index - 1]] = [editingContent[index - 1], editingContent[index]];
+        renderEditor(currentChapter);
+      }
+    }
+
+    function moveBlockDown(index) {
+      if (index < editingContent.length - 1) {
+        [editingContent[index], editingContent[index + 1]] = [editingContent[index + 1], editingContent[index]];
+        renderEditor(currentChapter);
+      }
+    }
+
+    // 保存章节
+    async function saveChapter() {
+      if (!currentChapter) return;
+
+      const response = await fetch(`http://localhost:3000/api/textbooks/${currentTextbook.id}/chapters/${currentChapter.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: editingContent })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        showSuccessNotification(`章节 "${currentChapter.title}" 已成功更新并推送给学生!`);
+        currentChapter = result.chapter;
+        loadTextbook(currentTextbook.id);
+      }
+    }
+
+    // 取消编辑
+    function cancelEdit() {
+      if (confirm('确定要取消编辑吗? 未保存的更改将丢失。')) {
+        editChapter(currentChapter.id);
+      }
+    }
+
+    // 新增章节模态框
+    function openAddChapterModal() {
+      document.getElementById('addChapterModal').classList.add('show');
+    }
+
+    function closeAddChapterModal() {
+      document.getElementById('addChapterModal').classList.remove('show');
+      document.getElementById('chapterTitle').value = '';
+    }
+
+    async function createNewChapter() {
+      const title = document.getElementById('chapterTitle').value.trim();
+      if (!title) {
+        alert('请输入章节标题');
+        return;
+      }
+
+      const response = await fetch(`http://localhost:3000/api/textbooks/${currentTextbook.id}/chapters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          content: [
+            {
+              id: `cb-${Date.now()}`,
+              type: 'text',
+              content: `# ${title}\n\n在此输入章节内容...`,
+              version: '1.0'
+            }
+          ],
+          tags: ['新增']
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        showSuccessNotification(`章节 "${title}" 已成功创建!`);
+        closeAddChapterModal();
+        loadTextbook(currentTextbook.id);
+        setTimeout(() => {
+          editChapter(result.chapter.id);
+        }, 500);
+      }
+    }
+
+    // 显示成功通知
+    function showSuccessNotification(message) {
+      const notification = document.getElementById('successNotification');
+      const messageEl = document.getElementById('successMessage');
+      messageEl.textContent = message;
+      notification.classList.add('show');
+
+      setTimeout(() => {
+        notification.classList.remove('show');
+      }, 5000);
+    }
+
+    // Socket.io 事件处理
+    socket.on('connect', () => {
+      console.log('✅ 已连接到服务器');
+      document.getElementById('statusDot').classList.remove('disconnected');
+      document.getElementById('statusText').textContent = '已连接';
+    });
+
+    socket.on('disconnect', () => {
+      console.log('❌ 与服务器断开连接');
+      document.getElementById('statusDot').classList.add('disconnected');
+      document.getElementById('statusText').textContent = '未连接';
+    });
+
+    // 页面加载时初始化
+    init();
+  </script>
+</body>
+</html>

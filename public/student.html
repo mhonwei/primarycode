@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>学生阅读器 - 电子教材实时更新系统</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: white;
+      border-radius: 12px;
+      padding: 20px 30px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    h1 {
+      color: #2d3748;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: #718096;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #48bb78;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .status-dot.disconnected {
+      background: #f56565;
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .main-content {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 20px;
+    }
+
+    .sidebar {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      height: fit-content;
+      max-height: calc(100vh - 140px);
+      overflow-y: auto;
+    }
+
+    .sidebar h2 {
+      color: #2d3748;
+      font-size: 18px;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+
+    .chapter-list {
+      list-style: none;
+    }
+
+    .chapter-item {
+      padding: 12px;
+      margin-bottom: 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .chapter-item:hover {
+      background: #f7fafc;
+      border-color: #cbd5e0;
+    }
+
+    .chapter-item.active {
+      background: #667eea;
+      color: white;
+      border-color: #667eea;
+    }
+
+    .chapter-checkbox {
+      cursor: pointer;
+    }
+
+    .chapter-title {
+      flex: 1;
+      font-size: 14px;
+    }
+
+    .content-area {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      min-height: 500px;
+      max-height: calc(100vh - 140px);
+      overflow-y: auto;
+    }
+
+    .content-area h2 {
+      color: #2d3748;
+      margin-bottom: 20px;
+      font-size: 28px;
+    }
+
+    .content-block {
+      margin-bottom: 20px;
+    }
+
+    .content-block.text-block {
+      line-height: 1.8;
+      color: #4a5568;
+    }
+
+    .content-block.text-block h1 {
+      font-size: 32px;
+      margin: 20px 0 15px;
+      color: #1a202c;
+    }
+
+    .content-block.text-block h2 {
+      font-size: 24px;
+      margin: 18px 0 12px;
+      color: #2d3748;
+    }
+
+    .content-block.text-block p {
+      margin: 10px 0;
+    }
+
+    .content-block.text-block ul, .content-block.text-block ol {
+      margin-left: 25px;
+      margin: 10px 0;
+    }
+
+    .content-block.text-block li {
+      margin: 5px 0;
+    }
+
+    .content-block.code-block {
+      position: relative;
+    }
+
+    .code-header {
+      background: #1a202c;
+      color: #a0aec0;
+      padding: 8px 15px;
+      border-radius: 8px 8px 0 0;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .content-block.code-block pre {
+      margin: 0;
+      border-radius: 0 0 8px 8px;
+      overflow-x: auto;
+    }
+
+    .content-block.code-block code {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .update-notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #48bb78;
+      color: white;
+      padding: 15px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(72, 187, 120, 0.3);
+      display: none;
+      animation: slideIn 0.3s ease-out;
+      max-width: 300px;
+      z-index: 1000;
+    }
+
+    .update-notification.show {
+      display: block;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #a0aec0;
+    }
+
+    .empty-state-icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+    }
+
+    .empty-state h3 {
+      font-size: 20px;
+      margin-bottom: 10px;
+      color: #718096;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+    }
+
+    .select-all-btn {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .select-all-btn:hover {
+      background: #5a67d8;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #edf2f7;
+      color: #4a5568;
+      border-radius: 12px;
+      font-size: 11px;
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>
+        <span>📚</span>
+        学生阅读器
+      </h1>
+      <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">已连接</span>
+      </div>
+    </header>
+
+    <div class="main-content">
+      <aside class="sidebar">
+        <h2>章节目录</h2>
+        <button class="select-all-btn" onclick="toggleAllChapters()">全选 / 取消全选</button>
+        <ul class="chapter-list" id="chapterList">
+          <!-- 章节列表将动态加载 -->
+        </ul>
+      </aside>
+
+      <main class="content-area" id="contentArea">
+        <div class="empty-state">
+          <div class="empty-state-icon">📖</div>
+          <h3>欢迎使用电子教材系统</h3>
+          <p>请从左侧选择要订阅的章节</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="update-notification" id="updateNotification">
+    <strong>📢 内容已更新!</strong>
+    <p id="updateMessage"></p>
+  </div>
+
+  <script>
+    // Socket.io 连接
+    const socket = io('http://localhost:3000');
+
+    // 全局状态
+    let currentTextbook = null;
+    let selectedChapters = new Set();
+    let currentChapter = null;
+
+    // 初始化
+    async function init() {
+      // 加载教材列表
+      const textbooks = await fetch('http://localhost:3000/api/textbooks').then(r => r.json());
+      if (textbooks.length > 0) {
+        currentTextbook = textbooks[0];
+        loadTextbook(currentTextbook.id);
+      }
+    }
+
+    // 加载教材
+    async function loadTextbook(textbookId) {
+      const textbook = await fetch(`http://localhost:3000/api/textbooks/${textbookId}`).then(r => r.json());
+      currentTextbook = textbook;
+
+      // 订阅教材
+      socket.emit('subscribe-textbook', textbookId);
+
+      // 渲染章节列表
+      renderChapterList(textbook.chapters);
+    }
+
+    // 渲染章节列表
+    function renderChapterList(chapters) {
+      const chapterList = document.getElementById('chapterList');
+      chapterList.innerHTML = chapters.map(chapter => `
+        <li class="chapter-item" onclick="viewChapter('${chapter.id}')">
+          <input
+            type="checkbox"
+            class="chapter-checkbox"
+            id="check-${chapter.id}"
+            onchange="toggleChapterSubscription('${chapter.id}', event)"
+            onclick="event.stopPropagation()"
+          >
+          <span class="chapter-title">${chapter.title}</span>
+          <span class="badge">v${chapter.version}</span>
+        </li>
+      `).join('');
+    }
+
+    // 切换章节订阅
+    function toggleChapterSubscription(chapterId, event) {
+      event.stopPropagation();
+
+      if (selectedChapters.has(chapterId)) {
+        selectedChapters.delete(chapterId);
+        socket.emit('unsubscribe', { type: 'chapter', id: chapterId });
+        console.log('🚫 取消订阅章节:', chapterId);
+      } else {
+        selectedChapters.add(chapterId);
+        socket.emit('subscribe-chapters', {
+          textbookId: currentTextbook.id,
+          chapterIds: [chapterId]
+        });
+        console.log('✅ 订阅章节:', chapterId);
+      }
+    }
+
+    // 全选/取消全选
+    function toggleAllChapters() {
+      const checkboxes = document.querySelectorAll('.chapter-checkbox');
+      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+
+      checkboxes.forEach(cb => {
+        const chapterId = cb.id.replace('check-', '');
+        if (allChecked) {
+          cb.checked = false;
+          selectedChapters.delete(chapterId);
+          socket.emit('unsubscribe', { type: 'chapter', id: chapterId });
+        } else {
+          cb.checked = true;
+          selectedChapters.add(chapterId);
+        }
+      });
+
+      if (!allChecked) {
+        socket.emit('subscribe-chapters', {
+          textbookId: currentTextbook.id,
+          chapterIds: Array.from(selectedChapters)
+        });
+      }
+    }
+
+    // 查看章节
+    async function viewChapter(chapterId) {
+      const chapter = await fetch(`http://localhost:3000/api/textbooks/${currentTextbook.id}/chapters/${chapterId}`).then(r => r.json());
+      currentChapter = chapter;
+      renderChapterContent(chapter);
+
+      // 更新活动状态
+      document.querySelectorAll('.chapter-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      event.currentTarget.classList.add('active');
+    }
+
+    // 渲染章节内容
+    function renderChapterContent(chapter) {
+      const contentArea = document.getElementById('contentArea');
+
+      const contentHTML = chapter.content.map(block => {
+        if (block.type === 'text') {
+          const html = marked.parse(block.content);
+          return `<div class="content-block text-block">${html}</div>`;
+        } else if (block.type === 'code') {
+          const highlighted = hljs.highlight(block.content, { language: block.language || 'javascript' }).value;
+          return `
+            <div class="content-block code-block">
+              <div class="code-header">${block.language || 'javascript'}</div>
+              <pre><code class="hljs">${highlighted}</code></pre>
+            </div>
+          `;
+        }
+        return '';
+      }).join('');
+
+      contentArea.innerHTML = `
+        <h2>${chapter.title} <span class="badge">版本 ${chapter.version}</span></h2>
+        ${contentHTML}
+      `;
+    }
+
+    // Socket.io 事件处理
+
+    socket.on('connect', () => {
+      console.log('✅ 已连接到服务器');
+      document.getElementById('statusDot').classList.remove('disconnected');
+      document.getElementById('statusText').textContent = '已连接';
+    });
+
+    socket.on('disconnect', () => {
+      console.log('❌ 与服务器断开连接');
+      document.getElementById('statusDot').classList.add('disconnected');
+      document.getElementById('statusText').textContent = '未连接';
+    });
+
+    socket.on('subscribed', (data) => {
+      console.log('📝 订阅成功:', data);
+    });
+
+    socket.on('content-update', (event) => {
+      console.log('🔄 收到更新:', event);
+
+      if (event.type === 'chapter_updated') {
+        // 显示更新通知
+        showUpdateNotification(`章节 "${event.chapter.title}" 已更新到版本 ${event.chapter.version}`);
+
+        // 如果当前正在查看该章节,自动刷新内容
+        if (currentChapter && currentChapter.id === event.chapterId) {
+          renderChapterContent(event.chapter);
+          currentChapter = event.chapter;
+        }
+
+        // 更新章节列表中的版本号
+        const badge = document.querySelector(`#check-${event.chapterId}`).parentElement.querySelector('.badge');
+        if (badge) {
+          badge.textContent = `v${event.chapter.version}`;
+        }
+      } else if (event.type === 'chapter_added') {
+        showUpdateNotification(`新增章节: "${event.chapter.title}"`);
+        // 重新加载章节列表
+        loadTextbook(currentTextbook.id);
+      }
+    });
+
+    // 显示更新通知
+    function showUpdateNotification(message) {
+      const notification = document.getElementById('updateNotification');
+      const messageEl = document.getElementById('updateMessage');
+      messageEl.textContent = message;
+      notification.classList.add('show');
+
+      setTimeout(() => {
+        notification.classList.remove('show');
+      }, 5000);
+    }
+
+    // 页面加载时初始化
+    init();
+  </script>
+</body>
+</html>

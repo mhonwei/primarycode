@@ -1,0 +1,21 @@
+{
+  "name": "etextbook-realtime-demo",
+  "version": "1.0.0",
+  "description": "实时更新电子教材演示系统",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js"
+  },
+  "keywords": ["etextbook", "realtime", "websocket", "education"],
+  "author": "mhonwei",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
