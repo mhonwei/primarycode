@@ -1,0 +1,56 @@
+<!-- 个人页面 -->
+<view class="container">
+  <!-- 用户卡片 -->
+  <view class="profile-card">
+    <view class="avatar">👤</view>
+    <view class="username">健康生活家</view>
+    <view class="subtitle">关注健康，科学养生</view>
+  </view>
+
+  <!-- 统计 -->
+  <view class="stats-row">
+    <view class="stat-item">
+      <view class="stat-number">{{userStats.read}}</view>
+      <view class="stat-label">已阅读</view>
+    </view>
+    <view class="stat-item">
+      <view class="stat-number">{{userStats.liked}}</view>
+      <view class="stat-label">已点赞</view>
+    </view>
+    <view class="stat-item">
+      <view class="stat-number">{{userStats.shared}}</view>
+      <view class="stat-label">已分享</view>
+    </view>
+  </view>
+
+  <!-- 设置菜单 -->
+  <view class="menu-section">
+    <view class="menu-title">设置</view>
+
+    <view class="menu-item">
+      <text>字体大小</text>
+      <view class="font-controls">
+        <view
+          class="font-btn {{fontSize === 'small' ? 'active' : ''}}"
+          data-size="small"
+          bindtap="onFontSize"
+        >小</view>
+        <view
+          class="font-btn {{fontSize === 'medium' ? 'active' : ''}}"
+          data-size="medium"
+          bindtap="onFontSize"
+        >中</view>
+        <view
+          class="font-btn {{fontSize === 'large' ? 'active' : ''}}"
+          data-size="large"
+          bindtap="onFontSize"
+        >大</view>
+      </view>
+    </view>
+
+    <view class="menu-item" bindtap="onAbout">
+      <text>关于我们</text>
+      <text class="arrow">›</text>
+    </view>
+  </view>
+</view>

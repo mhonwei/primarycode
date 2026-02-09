@@ -1,0 +1,30 @@
+{
+  "name": "health-news-aggregator",
+  "version": "1.0.0",
+  "description": "健康资讯聚合平台 - 定期采集健康、养生、科学研究资讯，面向中老年及青年人群提供科学健康信息服务",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "aggregate": "node server/scripts/run-aggregation.js",
+    "test": "node --test server/tests/test.js"
+  },
+  "keywords": [
+    "health",
+    "news",
+    "aggregator",
+    "wellness",
+    "nutrition",
+    "wechat-miniprogram"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "node-cron": "^3.0.3",
+    "rss-parser": "^3.13.0",
+    "cheerio": "^1.0.0"
+  }
+}

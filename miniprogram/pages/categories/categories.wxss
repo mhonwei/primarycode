@@ -1,0 +1,40 @@
+/* 分类页面样式 */
+
+.category-grid {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 20rpx 16rpx;
+  gap: 16rpx;
+}
+
+.category-card {
+  width: calc(50% - 24rpx);
+  background: #ffffff;
+  border-radius: 16rpx;
+  padding: 32rpx 24rpx;
+  text-align: center;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.05);
+}
+
+.cat-icon {
+  font-size: 56rpx;
+  margin-bottom: 12rpx;
+}
+
+.cat-name {
+  font-size: 30rpx;
+  font-weight: 600;
+  margin-bottom: 8rpx;
+}
+
+.cat-desc {
+  font-size: 22rpx;
+  color: #9ca3af;
+  margin-bottom: 12rpx;
+}
+
+.cat-count {
+  font-size: 22rpx;
+  color: #10b981;
+  font-weight: 500;
+}

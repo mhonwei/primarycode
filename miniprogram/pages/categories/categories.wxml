@@ -1,0 +1,24 @@
+<!-- 分类页面 -->
+<view class="container">
+  <view class="category-grid">
+    <view
+      wx:for="{{categories}}"
+      wx:key="id"
+      class="category-card"
+      data-category="{{item}}"
+      bindtap="onCategoryTap"
+    >
+      <view class="cat-icon">{{item.icon}}</view>
+      <view class="cat-name">{{item.name}}</view>
+      <view class="cat-desc">{{item.description}}</view>
+      <view class="cat-count">{{item.articleCount || 0}} 篇文章</view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading">加载中...</view>
+
+  <view wx:if="{{!loading && categories.length === 0}}" class="empty-state">
+    <view class="empty-icon">📂</view>
+    <view class="empty-text">暂无分类</view>
+  </view>
+</view>
