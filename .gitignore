@@ -9,4 +9,5 @@ data/
 Thumbs.db
 *.log
 dist/
+node_portable/
 miniprogram/miniprogram_npm/
