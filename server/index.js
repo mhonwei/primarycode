@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const config = require('./config');
-const { getDatabase, closeDatabase } = require('./database');
+const { initDatabase, closeDatabase } = require('./database');
 const { startScheduler, stopScheduler } = require('./services/scheduler');
 const articlesRouter = require('./routes/articles');
 const categoriesRouter = require('./routes/categories');
@@ -50,9 +50,9 @@ app.use((err, req, res, _next) => {
 });
 
 // 启动服务器
-function start() {
+async function start() {
   // 初始化数据库
-  getDatabase();
+  await initDatabase();
   console.log('[数据库] 初始化完成');
 
   // 启动定时任务

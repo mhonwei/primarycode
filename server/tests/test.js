@@ -5,7 +5,7 @@ const path = require('path');
 // 设置测试数据库路径
 process.env.DB_PATH = path.join(__dirname, '..', '..', 'data', 'test_health_news.db');
 
-const { getDatabase, closeDatabase } = require('../database');
+const { initDatabase, getDatabase, closeDatabase } = require('../database');
 const {
   transformTitle,
   transformContent,
@@ -16,6 +16,11 @@ const {
   extractHealthTips,
   transformArticle,
 } = require('../services/transformer');
+
+// 在所有测试前初始化数据库
+before(async () => {
+  await initDatabase();
+});
 
 describe('Database', () => {
   it('should initialize database successfully', () => {
@@ -141,8 +146,6 @@ after(() => {
   const testDbPath = path.join(__dirname, '..', '..', 'data', 'test_health_news.db');
   try {
     fs.unlinkSync(testDbPath);
-    fs.unlinkSync(testDbPath + '-wal');
-    fs.unlinkSync(testDbPath + '-shm');
   } catch {
     // 文件可能不存在
   }

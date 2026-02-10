@@ -1,12 +1,152 @@
-const Database = require('better-sqlite3');
+const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
 const config = require('./config');
 
-let db;
+let dbWrapper = null;
 
-function getDatabase() {
-  if (db) return db;
+/**
+ * sql.js 兼容层 - 提供与 better-sqlite3 相同的 API
+ * 这样其他文件的代码不需要修改
+ */
+class DatabaseWrapper {
+  constructor(sqlDb, dbPath) {
+    this.db = sqlDb;
+    this.dbPath = dbPath;
+    this._saveTimer = null;
+  }
+
+  exec(sql) {
+    this.db.exec(sql);
+    this._scheduleSave();
+  }
+
+  prepare(sql) {
+    const self = this;
+
+    return {
+      run(...params) {
+        const converted = convertParams(params);
+        if (converted) {
+          self.db.run(sql, converted);
+        } else {
+          self.db.run(sql);
+        }
+        self._scheduleSave();
+
+        const changes = self.db.getRowsModified();
+        const lastInsertRowid = self._getLastRowId();
+        return { changes, lastInsertRowid };
+      },
+
+      get(...params) {
+        let stmt;
+        try {
+          stmt = self.db.prepare(sql);
+          const converted = convertParams(params);
+          if (converted) stmt.bind(converted);
+
+          if (stmt.step()) {
+            return stmt.getAsObject();
+          }
+          return undefined;
+        } finally {
+          if (stmt) stmt.free();
+        }
+      },
+
+      all(...params) {
+        let stmt;
+        try {
+          stmt = self.db.prepare(sql);
+          const converted = convertParams(params);
+          if (converted) stmt.bind(converted);
+
+          const results = [];
+          while (stmt.step()) {
+            results.push(stmt.getAsObject());
+          }
+          return results;
+        } finally {
+          if (stmt) stmt.free();
+        }
+      },
+    };
+  }
+
+  pragma() {
+    // sql.js 不支持 pragma，忽略
+  }
+
+  _getLastRowId() {
+    const stmt = this.db.prepare('SELECT last_insert_rowid() as id');
+    let id = 0;
+    if (stmt.step()) {
+      id = stmt.getAsObject().id;
+    }
+    stmt.free();
+    return id;
+  }
+
+  _scheduleSave() {
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => this._save(), 200);
+  }
+
+  _save() {
+    try {
+      const data = this.db.export();
+      fs.writeFileSync(this.dbPath, Buffer.from(data));
+    } catch (err) {
+      console.error('[DB] Save error:', err.message);
+    }
+  }
+
+  close() {
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._save();
+    this.db.close();
+    dbWrapper = null;
+  }
+}
+
+/**
+ * 转换参数格式
+ * better-sqlite3: .run(val1, val2) 或 .run({name: val})
+ * sql.js: .bind([val1, val2]) 或 .bind({"@name": val})
+ */
+function convertParams(params) {
+  if (params.length === 0) return null;
+
+  // 单个对象参数 → 命名参数
+  if (
+    params.length === 1 &&
+    typeof params[0] === 'object' &&
+    params[0] !== null &&
+    !Array.isArray(params[0])
+  ) {
+    const obj = params[0];
+    const converted = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const paramKey = key.startsWith('@') || key.startsWith('$') || key.startsWith(':')
+        ? key
+        : `@${key}`;
+      converted[paramKey] = value === undefined ? null : value;
+    }
+    return converted;
+  }
+
+  // 位置参数
+  return params.map((v) => (v === undefined ? null : v));
+}
+
+/**
+ * 初始化数据库（异步，启动时调用一次）
+ */
+async function initDatabase() {
+  if (dbWrapper) return dbWrapper;
+
+  const SQL = await initSqlJs();
 
   // 确保数据目录存在
   const dbDir = path.dirname(config.dbPath);
@@ -14,20 +154,35 @@ function getDatabase() {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  db = new Database(config.dbPath);
+  // 加载已有数据库或创建新的
+  let sqlDb;
+  if (fs.existsSync(config.dbPath)) {
+    const buffer = fs.readFileSync(config.dbPath);
+    sqlDb = new SQL.Database(buffer);
+  } else {
+    sqlDb = new SQL.Database();
+  }
 
-  // 启用 WAL 模式提升并发性能
-  db.pragma('journal_mode = WAL');
+  dbWrapper = new DatabaseWrapper(sqlDb, config.dbPath);
 
   // 初始化表结构
-  initTables(db);
+  initTables(dbWrapper);
 
-  return db;
+  return dbWrapper;
+}
+
+/**
+ * 获取数据库实例（同步，需先调用 initDatabase）
+ */
+function getDatabase() {
+  if (!dbWrapper) {
+    throw new Error('Database not initialized. Call initDatabase() first.');
+  }
+  return dbWrapper;
 }
 
 function initTables(db) {
   db.exec(`
-    -- 文章表
     CREATE TABLE IF NOT EXISTS articles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       source_name TEXT NOT NULL,
@@ -36,43 +191,27 @@ function initTables(db) {
       original_content TEXT,
       original_link TEXT UNIQUE,
       original_language TEXT DEFAULT 'en',
-
-      -- 转换后的中文内容
       title TEXT,
       summary TEXT,
       content TEXT,
-
-      -- 分类与标签
       category TEXT DEFAULT 'wellness',
       tags TEXT DEFAULT '[]',
-
-      -- 适用人群标签
       audience TEXT DEFAULT '["all"]',
-
-      -- 健康提示/实用建议
       health_tips TEXT,
-
-      -- 状态管理
       status TEXT DEFAULT 'pending',
-
-      -- 时间信息
       published_at DATETIME,
       aggregated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       transformed_at DATETIME,
-
-      -- 阅读统计
       view_count INTEGER DEFAULT 0,
       like_count INTEGER DEFAULT 0,
       share_count INTEGER DEFAULT 0
     );
 
-    -- 分类索引
     CREATE INDEX IF NOT EXISTS idx_articles_category ON articles(category);
     CREATE INDEX IF NOT EXISTS idx_articles_status ON articles(status);
     CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at DESC);
     CREATE INDEX IF NOT EXISTS idx_articles_aggregated ON articles(aggregated_at DESC);
 
-    -- 用户收藏表
     CREATE TABLE IF NOT EXISTS favorites (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT NOT NULL,
@@ -82,7 +221,6 @@ function initTables(db) {
       UNIQUE(user_id, article_id)
     );
 
-    -- 阅读历史表
     CREATE TABLE IF NOT EXISTS reading_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT NOT NULL,
@@ -92,7 +230,6 @@ function initTables(db) {
       FOREIGN KEY (article_id) REFERENCES articles(id)
     );
 
-    -- 采集日志表
     CREATE TABLE IF NOT EXISTS aggregation_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       source_name TEXT NOT NULL,
@@ -106,10 +243,10 @@ function initTables(db) {
 }
 
 function closeDatabase() {
-  if (db) {
-    db.close();
-    db = null;
+  if (dbWrapper) {
+    dbWrapper.close();
+    dbWrapper = null;
   }
 }
 
-module.exports = { getDatabase, closeDatabase };
+module.exports = { initDatabase, getDatabase, closeDatabase };

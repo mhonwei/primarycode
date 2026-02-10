@@ -2,7 +2,7 @@
  * 手动运行采集脚本
  * 使用方法: node server/scripts/run-aggregation.js
  */
-const { getDatabase, closeDatabase } = require('../database');
+const { initDatabase, closeDatabase } = require('../database');
 const { runAggregation } = require('../services/aggregator');
 const { transformPendingArticles } = require('../services/transformer');
 
@@ -10,7 +10,7 @@ async function main() {
   console.log('健康资讯采集脚本启动\n');
 
   // 初始化数据库
-  getDatabase();
+  await initDatabase();
 
   try {
     // 运行采集
