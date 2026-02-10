@@ -66,18 +66,19 @@ module.exports = {
     retentionDays: 90,
   },
 
-  // 内容分类
+  // 内容分类（面向中老年人优化排序）
   categories: [
-    { id: 'medical_research', name: '医学研究', icon: '🔬', description: '最新医学科研成果' },
+    { id: 'chronic_disease', name: '慢病管理', icon: '💊', description: '三高、糖尿病等慢性病管理' },
     { id: 'nutrition', name: '饮食营养', icon: '🥗', description: '科学饮食与营养指导' },
-    { id: 'wellness', name: '养生保健', icon: '🧘', description: '日常养生与保健知识' },
-    { id: 'fitness', name: '运动健身', icon: '💪', description: '科学运动与健身指导' },
-    { id: 'disease_prevention', name: '疾病预防', icon: '🛡️', description: '疾病预防与早期筛查' },
-    { id: 'mental_health', name: '心理健康', icon: '🧠', description: '心理健康与情绪管理' },
-    { id: 'rehabilitation', name: '康复护理', icon: '🏥', description: '疾病康复与护理指导' },
-    { id: 'public_health', name: '公共卫生', icon: '🌍', description: '公共卫生与健康政策' },
-    { id: 'elderly_care', name: '老年健康', icon: '👴', description: '中老年人健康管理' },
-    { id: 'traditional_medicine', name: '中医养生', icon: '🍵', description: '传统中医与养生智慧' },
+    { id: 'elderly_care', name: '乐龄健康', icon: '🌿', description: '中老年人健康管理与抗衰' },
+    { id: 'fitness', name: '运动康健', icon: '🚶', description: '适合中老年的科学运动' },
+    { id: 'disease_prevention', name: '疾病预防', icon: '🛡️', description: '筛查、疫苗与风险防控' },
+    { id: 'mental_health', name: '身心调养', icon: '🧘', description: '睡眠、情绪与认知健康' },
+    { id: 'medical_research', name: '前沿发现', icon: '🔬', description: '国际医学最新科研成果' },
+    { id: 'rehabilitation', name: '康复护理', icon: '🏥', description: '术后康复与护理指导' },
+    { id: 'wellness', name: '养生之道', icon: '☯️', description: '四季养生与生活智慧' },
+    { id: 'traditional_medicine', name: '中医养生', icon: '🍵', description: '传统中医与药食同源' },
+    { id: 'public_health', name: '健康资讯', icon: '📋', description: '公共卫生与健康政策' },
   ],
 
   // 内容转换配置

@@ -7,12 +7,12 @@ process.env.DB_PATH = path.join(__dirname, '..', '..', 'data', 'test_health_news
 
 const { initDatabase, getDatabase, closeDatabase } = require('../database');
 const {
-  transformTitle,
-  transformContent,
+  translateTitle,
+  translateContent,
+  generateChineseSummary,
   detectCategory,
   detectAudience,
   extractTags,
-  generateSummary,
   extractHealthTips,
   transformArticle,
 } = require('../services/transformer');
@@ -66,7 +66,7 @@ describe('Database', () => {
 
 describe('Content Transformer', () => {
   it('should transform health-related titles', () => {
-    const result = transformTitle('New Study Shows diabetes Treatment Breakthrough');
+    const result = translateTitle('New Study Shows diabetes Treatment Breakthrough');
     assert.ok(result.includes('糖尿病'), 'Should translate diabetes to Chinese');
   });
 
@@ -106,7 +106,7 @@ describe('Content Transformer', () => {
   it('should generate a summary from content', () => {
     const content =
       'This is a very important health study. It shows that regular exercise reduces the risk of heart disease. Walking 30 minutes daily is recommended.';
-    const summary = generateSummary(content);
+    const summary = generateChineseSummary('Health Study', content);
     assert.ok(summary.length > 0, 'Summary should not be empty');
     assert.ok(summary.length <= 600, 'Summary should be within length limits');
   });
@@ -115,7 +115,7 @@ describe('Content Transformer', () => {
     const tips = extractHealthTips('Exercise and fitness content', 'fitness');
     assert.ok(tips.length > 0, 'Should return health tips');
     assert.ok(
-      tips.some((t) => t.includes('温馨提示')),
+      tips.some((t) => t.includes('免责声明')),
       'Should include disclaimer'
     );
   });

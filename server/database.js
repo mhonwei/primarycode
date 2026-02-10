@@ -204,7 +204,11 @@ function initTables(db) {
       transformed_at DATETIME,
       view_count INTEGER DEFAULT 0,
       like_count INTEGER DEFAULT 0,
-      share_count INTEGER DEFAULT 0
+      share_count INTEGER DEFAULT 0,
+      key_points TEXT DEFAULT '[]',
+      credibility_score INTEGER DEFAULT 0,
+      credibility_level TEXT DEFAULT 'medium',
+      credibility_factors TEXT DEFAULT '[]'
     );
 
     CREATE INDEX IF NOT EXISTS idx_articles_category ON articles(category);
@@ -239,7 +243,37 @@ function initTables(db) {
       started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       finished_at DATETIME
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE,
+      phone TEXT UNIQUE,
+      nickname TEXT DEFAULT '健康达人',
+      password TEXT,
+      membership TEXT DEFAULT 'free',
+      font_size TEXT DEFAULT 'large',
+      interests TEXT DEFAULT '[]',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_login DATETIME
+    );
   `);
+
+  // 为已有数据库添加新列（如果不存在则添加，存在则忽略错误）
+  const alterStatements = [
+    "ALTER TABLE articles ADD COLUMN key_points TEXT DEFAULT '[]'",
+    "ALTER TABLE articles ADD COLUMN credibility_score INTEGER DEFAULT 0",
+    "ALTER TABLE articles ADD COLUMN credibility_level TEXT DEFAULT 'medium'",
+    "ALTER TABLE articles ADD COLUMN credibility_factors TEXT DEFAULT '[]'",
+    "ALTER TABLE users ADD COLUMN username TEXT UNIQUE",
+  ];
+
+  for (const sql of alterStatements) {
+    try {
+      db.exec(sql);
+    } catch (e) {
+      // Column already exists, ignore
+    }
+  }
 }
 
 function closeDatabase() {

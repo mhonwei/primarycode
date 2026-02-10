@@ -63,6 +63,7 @@ router.get('/', (req, res) => {
   const articles = db
     .prepare(
       `SELECT id, title, summary, category, tags, audience, health_tips,
+              key_points, credibility_score, credibility_level, credibility_factors,
               published_at, view_count, like_count, share_count, source_name
        FROM articles ${whereClause} ${orderClause}
        LIMIT ? OFFSET ?`
@@ -75,6 +76,8 @@ router.get('/', (req, res) => {
     tags: safeJsonParse(article.tags, []),
     audience: safeJsonParse(article.audience, ['all']),
     health_tips: safeJsonParse(article.health_tips, []),
+    key_points: safeJsonParse(article.key_points, []),
+    credibility_factors: safeJsonParse(article.credibility_factors, []),
   }));
 
   res.json({
@@ -115,6 +118,8 @@ router.get('/:id', (req, res) => {
       tags: safeJsonParse(article.tags, []),
       audience: safeJsonParse(article.audience, ['all']),
       health_tips: safeJsonParse(article.health_tips, []),
+      key_points: safeJsonParse(article.key_points, []),
+      credibility_factors: safeJsonParse(article.credibility_factors, []),
       view_count: article.view_count + 1,
     },
   });

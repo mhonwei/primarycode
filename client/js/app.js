@@ -1,5 +1,5 @@
 /**
- * 健康资讯聚合平台 - 前端主逻辑
+ * 乐龄健康资讯平台 - 前端主逻辑
  */
 (function () {
   'use strict';
@@ -50,18 +50,26 @@
     toast: $('#toast'),
   };
 
-  // ===== 分类名称映射 =====
+  // ===== 分类名称映射（匹配后端config.js） =====
   const categoryNames = {
-    medical_research: '医学研究',
+    chronic_disease: '慢病管理',
     nutrition: '饮食营养',
-    wellness: '养生保健',
-    fitness: '运动健身',
+    elderly_care: '乐龄健康',
+    fitness: '运动康健',
+    medical_research: '医学前沿',
     disease_prevention: '疾病预防',
     mental_health: '心理健康',
-    rehabilitation: '康复护理',
-    public_health: '公共卫生',
-    elderly_care: '老年健康',
     traditional_medicine: '中医养生',
+    rehabilitation: '康复护理',
+    wellness: '养生保健',
+    public_health: '公共卫生',
+  };
+
+  // ===== 可信度标签映射 =====
+  const credibilityLabels = {
+    high: '高可信',
+    medium: '一般',
+    low: '待验证',
   };
 
   // ===== 初始化 =====
@@ -99,6 +107,7 @@
     $('#btnFontSmall').addEventListener('click', () => setFontSize('small'));
     $('#btnFontMedium').addEventListener('click', () => setFontSize('medium'));
     $('#btnFontLarge').addEventListener('click', () => setFontSize('large'));
+    $('#btnFontXlarge').addEventListener('click', () => setFontSize('xlarge'));
   }
 
   // ===== 数据加载 =====
@@ -234,16 +243,35 @@
     card.className = 'article-card';
     const catName = categoryNames[article.category] || '健康资讯';
 
+    // 可信度徽章
+    let credBadge = '';
+    if (article.credibility_level) {
+      const level = article.credibility_level;
+      const label = credibilityLabels[level] || level;
+      credBadge = `<span class="credibility-badge ${level}">${label}</span>`;
+    }
+
+    // 标签
     let tagsHtml = '';
     if (article.tags && article.tags.length > 0) {
       const visibleTags = article.tags.slice(0, 3);
       tagsHtml = `<div class="article-tags">${visibleTags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>`;
     }
 
+    // 关键要点预览（取第一条）
+    let keypointHtml = '';
+    if (article.key_points && article.key_points.length > 0) {
+      keypointHtml = `<div class="article-keypoint">${escapeHtml(article.key_points[0])}</div>`;
+    }
+
     card.innerHTML = `
-      <span class="article-category">${catName}</span>
+      <div class="article-header-row">
+        <span class="article-category">${catName}</span>
+        ${credBadge}
+      </div>
       <h3 class="article-title">${escapeHtml(article.title || article.original_title || '')}</h3>
       <p class="article-summary">${escapeHtml(article.summary || '')}</p>
+      ${keypointHtml}
       ${tagsHtml}
       <div class="article-meta">
         <span>${article.source_name || ''} · ${formatDate(article.published_at)}</span>
@@ -357,13 +385,54 @@
       .map((p) => `<p>${escapeHtml(p)}</p>`)
       .join('');
 
+    // 可信度卡片
+    let credibilityHtml = '';
+    if (article.credibility_score || article.credibility_level) {
+      const score = article.credibility_score || 0;
+      const level = article.credibility_level || 'medium';
+      const label = credibilityLabels[level] || level;
+      const factors = article.credibility_factors || [];
+
+      credibilityHtml = `
+        <div class="credibility-card">
+          <div class="cred-header">
+            信息可信度评估
+            <span class="cred-score ${level}">${score}分 - ${label}</span>
+          </div>
+          ${factors.length > 0 ? `
+            <ul class="cred-factors">
+              ${factors.map((f) => `<li>${escapeHtml(f)}</li>`).join('')}
+            </ul>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    // 关键要点
+    let keyPointsHtml = '';
+    if (article.key_points && article.key_points.length > 0) {
+      keyPointsHtml = `
+        <div class="key-points">
+          <div class="kp-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            核心要点
+          </div>
+          <ul class="kp-list">
+            ${article.key_points.map((kp, i) => `<li data-num="${i + 1}">${escapeHtml(kp)}</li>`).join('')}
+          </ul>
+        </div>
+      `;
+    }
+
     // 健康提示
     let tipsHtml = '';
     if (article.health_tips && article.health_tips.length > 0) {
       tipsHtml = `
         <div class="health-tips">
           <div class="tips-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
               <path d="M12 16v-4"/><path d="M12 8h.01"/>
             </svg>
@@ -386,7 +455,7 @@
 
     els.articleDetail.innerHTML = `
       <div class="detail-back" id="detailBack">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="m15 18-6-6 6-6"/>
         </svg>
         返回列表
@@ -401,6 +470,8 @@
         <span>${article.view_count || 0} 次阅读</span>
       </div>
 
+      ${credibilityHtml}
+      ${keyPointsHtml}
       ${tagsHtml}
 
       <div class="detail-content">
@@ -409,15 +480,19 @@
 
       ${tipsHtml}
 
+      <div class="medical-disclaimer">
+        <strong>声明：</strong>本文内容仅供健康科普参考，不构成任何医疗诊断或治疗建议。如有健康问题，请及时就医咨询专业医生。
+      </div>
+
       <div class="article-actions">
         <button class="action-btn ${isLiked ? 'liked' : ''}" id="btnLike" data-id="${article.id}">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="${isLiked ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="${isLiked ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
           </svg>
           <span>${article.like_count || 0} 赞</span>
         </button>
         <button class="action-btn" id="btnShare" data-id="${article.id}">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
             <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
           </svg>
@@ -446,7 +521,7 @@
     els.viewDetail.classList.remove('active');
     els.viewList.classList.add('active');
     els.categoryNav.style.display = '';
-    els.headerTitle.textContent = '健康资讯';
+    els.headerTitle.textContent = '乐龄健康';
   }
 
   // ===== 交互处理 =====
@@ -477,7 +552,7 @@
   async function handleShare(articleId) {
     const article = state.currentArticle;
     const shareData = {
-      title: article ? article.title : '健康资讯',
+      title: article ? article.title : '乐龄健康',
       text: article ? article.summary : '',
       url: window.location.href,
     };
@@ -626,17 +701,22 @@
 
   // ===== 字体大小 =====
   function setFontSize(size) {
-    document.body.classList.remove('font-small', 'font-large');
-    if (size !== 'medium') {
+    document.body.classList.remove('font-small', 'font-medium', 'font-large', 'font-xlarge');
+    if (size !== 'large') {
+      // 默认是大号（:root已设为大字号），其他需要class
       document.body.classList.add(`font-${size}`);
     }
 
     // 更新按钮状态
     $$('.btn-font').forEach((btn) => btn.classList.remove('active'));
-    $(`#btnFont${size.charAt(0).toUpperCase() + size.slice(1)}`).classList.add('active');
+    const btnId = `#btnFont${size.charAt(0).toUpperCase() + size.slice(1)}`;
+    const btn = $(btnId);
+    if (btn) btn.classList.add('active');
 
     localStorage.setItem('fontSize', size);
-    showToast(`已切换为${size === 'small' ? '小' : size === 'large' ? '大' : '中'}字号`);
+
+    const sizeLabels = { small: '小', medium: '中', large: '大', xlarge: '特大' };
+    showToast(`已切换为${sizeLabels[size] || size}字号`);
   }
 
   // ===== 用户数据持久化 =====
@@ -648,14 +728,16 @@
       const liked = localStorage.getItem('likedArticles');
       if (liked) state.likedArticles = new Set(JSON.parse(liked));
 
-      const fontSize = localStorage.getItem('fontSize');
-      if (fontSize && fontSize !== 'medium') {
+      const fontSize = localStorage.getItem('fontSize') || 'large';
+      if (fontSize !== 'large') {
         document.body.classList.add(`font-${fontSize}`);
-        const btn = $(`#btnFont${fontSize.charAt(0).toUpperCase() + fontSize.slice(1)}`);
-        if (btn) {
-          $$('.btn-font').forEach((b) => b.classList.remove('active'));
-          btn.classList.add('active');
-        }
+      }
+      // 更新字体按钮状态
+      const btnId = `#btnFont${fontSize.charAt(0).toUpperCase() + fontSize.slice(1)}`;
+      const btn = $(btnId);
+      if (btn) {
+        $$('.btn-font').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
       }
     } catch (err) {
       console.error('加载用户数据失败:', err);

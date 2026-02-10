@@ -7,6 +7,7 @@ const { startScheduler, stopScheduler } = require('./services/scheduler');
 const articlesRouter = require('./routes/articles');
 const categoriesRouter = require('./routes/categories');
 const adminRouter = require('./routes/admin');
+const usersRouter = require('./routes/users');
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/api/articles', articlesRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/users', usersRouter);
 
 // 健康检查
 app.get('/api/health', (req, res) => {
@@ -61,7 +63,7 @@ async function start() {
   // 启动 HTTP 服务
   app.listen(config.port, config.host, () => {
     console.log(`\n${'='.repeat(50)}`);
-    console.log('  健康资讯聚合平台 v1.0.0');
+    console.log('  乐龄健康资讯平台 v2.0.0');
     console.log(`${'='.repeat(50)}`);
     console.log(`  服务地址: http://${config.host}:${config.port}`);
     console.log(`  API 文档: http://${config.host}:${config.port}/api/health`);

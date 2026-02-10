@@ -1,228 +1,83 @@
 const { getDatabase } = require('../database');
 const config = require('../config');
+const {
+  translateTitle,
+  translateContent,
+  generateChineseSummary,
+  extractKeyPoints,
+  assessCredibility,
+  HEALTH_DICT,
+} = require('./translator');
 
 /**
- * 内容转换服务
+ * 内容转换服务 v2
  *
- * 将采集到的英文/专业健康资讯转换为面向中老年人的
- * 简明中文健康科普内容。
- *
- * 当前实现使用基于规则的本地转换。
- * 可扩展为调用 AI API（如 OpenAI、Claude、百度文心等）进行智能翻译和改写。
+ * 将采集到的英文专业健康资讯转换为面向中老年人的
+ * 简明中文健康科普内容，并评估信息可信度。
  */
 
-// 常用健康领域英中术语映射
-const HEALTH_TERMS = {
-  // 疾病与症状
-  diabetes: '糖尿病',
-  hypertension: '高血压',
-  'high blood pressure': '高血压',
-  cholesterol: '胆固醇',
-  obesity: '肥胖症',
-  cancer: '癌症',
-  'heart disease': '心脏病',
-  cardiovascular: '心血管',
-  stroke: '中风',
-  alzheimer: '阿尔茨海默病（老年痴呆）',
-  dementia: '痴呆症',
-  arthritis: '关节炎',
-  osteoporosis: '骨质疏松',
-  insomnia: '失眠',
-  depression: '抑郁症',
-  anxiety: '焦虑症',
-  inflammation: '炎症',
-  infection: '感染',
-  allergy: '过敏',
-  asthma: '哮喘',
-  pneumonia: '肺炎',
-
-  // 营养与饮食
-  protein: '蛋白质',
-  vitamin: '维生素',
-  mineral: '矿物质',
-  fiber: '膳食纤维',
-  antioxidant: '抗氧化剂',
-  omega: 'Omega脂肪酸',
-  calcium: '钙',
-  iron: '铁',
-  zinc: '锌',
-  probiotic: '益生菌',
-  supplement: '营养补充剂',
-  calorie: '卡路里（热量）',
-  carbohydrate: '碳水化合物',
-  metabolism: '新陈代谢',
-
-  // 医学术语
-  clinical: '临床',
-  trial: '试验',
-  'clinical trial': '临床试验',
-  study: '研究',
-  research: '研究',
-  therapy: '疗法',
-  treatment: '治疗',
-  diagnosis: '诊断',
-  symptom: '症状',
-  vaccine: '疫苗',
-  antibody: '抗体',
-  immune: '免疫',
-  'immune system': '免疫系统',
-  gene: '基因',
-  dna: 'DNA（脱氧核糖核酸）',
-
-  // 运动与健身
-  exercise: '运动',
-  fitness: '健身',
-  aerobic: '有氧运动',
-  stretching: '拉伸运动',
-  yoga: '瑜伽',
-  walking: '步行',
-  'tai chi': '太极拳',
-  meditation: '冥想',
-  'blood pressure': '血压',
-  'heart rate': '心率',
-  bmi: 'BMI（身体质量指数）',
-};
-
-// 分类关键词映射
+// ===== 分类关键词 =====
 const CATEGORY_KEYWORDS = {
   nutrition: [
-    'diet',
-    'nutrition',
-    'food',
-    'eat',
-    'vitamin',
-    'supplement',
-    'protein',
-    'fiber',
-    'calorie',
-    'meal',
-    'fruit',
-    'vegetable',
-    'omega',
-    'mineral',
-    'probiotic',
+    'diet', 'nutrition', 'food', 'eat', 'vitamin', 'supplement', 'protein',
+    'fiber', 'calorie', 'meal', 'fruit', 'vegetable', 'omega', 'mineral',
+    'probiotic', 'Mediterranean', 'whole grain', 'antioxidant',
   ],
   fitness: [
-    'exercise',
-    'fitness',
-    'workout',
-    'physical activity',
-    'aerobic',
-    'yoga',
-    'tai chi',
-    'walking',
-    'strength',
-    'flexibility',
-    'sports',
+    'exercise', 'fitness', 'workout', 'physical activity', 'aerobic', 'yoga',
+    'tai chi', 'walking', 'strength', 'flexibility', 'sports', 'swimming',
+    'balance', 'resistance training',
   ],
   disease_prevention: [
-    'prevention',
-    'screening',
-    'vaccine',
-    'risk factor',
-    'early detection',
-    'checkup',
-    'lifestyle',
-    'immune',
+    'prevention', 'screening', 'vaccine', 'risk factor', 'early detection',
+    'checkup', 'lifestyle', 'immune', 'risk reduction',
   ],
   mental_health: [
-    'mental',
-    'depression',
-    'anxiety',
-    'stress',
-    'sleep',
-    'insomnia',
-    'meditation',
-    'mindfulness',
-    'cognitive',
-    'brain health',
-    'mood',
+    'mental', 'depression', 'anxiety', 'stress', 'sleep', 'insomnia',
+    'meditation', 'mindfulness', 'cognitive', 'brain health', 'mood', 'memory',
   ],
   rehabilitation: [
-    'rehabilitation',
-    'recovery',
-    'therapy',
-    'physical therapy',
-    'occupational therapy',
-    'post-surgery',
-    'rehab',
+    'rehabilitation', 'recovery', 'therapy', 'physical therapy',
+    'occupational therapy', 'post-surgery', 'rehab', 'stroke recovery',
   ],
   elderly_care: [
-    'elderly',
-    'aging',
-    'senior',
-    'older adult',
-    'geriatric',
-    'alzheimer',
-    'dementia',
-    'osteoporosis',
-    'fall prevention',
+    'elderly', 'aging', 'senior', 'older adult', 'geriatric', 'alzheimer',
+    'dementia', 'osteoporosis', 'fall prevention', 'longevity', 'frailty',
+    'sarcopenia', 'cognitive decline', 'healthy aging',
+  ],
+  chronic_disease: [
+    'diabetes', 'hypertension', 'heart disease', 'cardiovascular', 'cholesterol',
+    'blood pressure', 'blood sugar', 'chronic', 'obesity', 'metabolic',
   ],
   medical_research: [
-    'study',
-    'research',
-    'clinical trial',
-    'finding',
-    'discovery',
-    'breakthrough',
-    'scientists',
-    'researchers',
-    'journal',
-    'published',
+    'study', 'research', 'clinical trial', 'finding', 'discovery', 'breakthrough',
+    'scientists', 'researchers', 'journal', 'published', 'meta-analysis',
   ],
   public_health: [
-    'WHO',
-    'public health',
-    'pandemic',
-    'epidemic',
-    'outbreak',
-    'policy',
-    'regulation',
-    'guideline',
-    'population',
+    'WHO', 'public health', 'pandemic', 'epidemic', 'outbreak', 'policy',
+    'regulation', 'guideline', 'population',
   ],
   traditional_medicine: [
-    'traditional',
-    'herbal',
-    'chinese medicine',
-    'acupuncture',
-    'natural remedy',
-    'holistic',
-    'integrative',
+    'traditional', 'herbal', 'chinese medicine', 'acupuncture',
+    'natural remedy', 'holistic', 'integrative',
   ],
 };
 
-// 受众关键词映射
+// ===== 受众检测 =====
 const AUDIENCE_KEYWORDS = {
   elderly: [
-    'senior',
-    'elderly',
-    'older',
-    'aging',
-    'retirement',
-    'geriatric',
-    'alzheimer',
-    'dementia',
-    'osteoporosis',
-    'arthritis',
+    'senior', 'elderly', 'older', 'aging', 'retirement', 'geriatric',
+    'alzheimer', 'dementia', 'osteoporosis', 'arthritis', 'longevity',
+    'fall prevention', 'cognitive decline', 'memory loss',
   ],
-  youth: [
-    'young',
-    'student',
-    'teenager',
-    'adolescent',
-    'college',
-    'millennial',
-    'fitness',
-    'sports',
-    'mental health',
-    'anxiety',
+  middle_aged: [
+    'middle-aged', 'midlife', 'prevention', 'screening', 'cholesterol',
+    'blood pressure', 'weight management', 'stress', 'work-life',
   ],
-  all: [],
 };
 
 /**
- * 自动检测文章最合适的分类
+ * 检测最合适的分类
  */
 function detectCategory(title, content) {
   const text = `${title} ${content}`.toLowerCase();
@@ -234,9 +89,7 @@ function detectCategory(title, content) {
     for (const keyword of keywords) {
       const regex = new RegExp(keyword, 'gi');
       const matches = text.match(regex);
-      if (matches) {
-        score += matches.length;
-      }
+      if (matches) score += matches.length;
     }
     if (score > bestScore) {
       bestScore = score;
@@ -255,7 +108,6 @@ function detectAudience(title, content) {
   const audiences = [];
 
   for (const [audience, keywords] of Object.entries(AUDIENCE_KEYWORDS)) {
-    if (audience === 'all') continue;
     for (const keyword of keywords) {
       if (text.includes(keyword)) {
         audiences.push(audience);
@@ -268,196 +120,198 @@ function detectAudience(title, content) {
 }
 
 /**
- * 简单的标题翻译/转换
- * 基于规则的转换，实际项目建议接入翻译 API
- */
-function transformTitle(originalTitle) {
-  let title = originalTitle;
-
-  // 替换已知术语
-  for (const [en, zh] of Object.entries(HEALTH_TERMS)) {
-    const regex = new RegExp(`\\b${en}\\b`, 'gi');
-    title = title.replace(regex, zh);
-  }
-
-  // 如果标题仍然主要是英文，添加前缀说明
-  const chineseCharCount = (title.match(/[\u4e00-\u9fff]/g) || []).length;
-  const totalLength = title.length;
-
-  if (chineseCharCount / totalLength < 0.3 && totalLength > 10) {
-    // 标题主要是英文，保留已替换术语的版本并添加标注
-    return `【健康资讯】${title}`;
-  }
-
-  return title;
-}
-
-/**
- * 转换文章内容，使其适合目标读者
- */
-function transformContent(originalContent, category) {
-  if (!originalContent) return '';
-
-  let content = originalContent;
-
-  // 替换健康术语
-  for (const [en, zh] of Object.entries(HEALTH_TERMS)) {
-    const regex = new RegExp(`\\b${en}\\b`, 'gi');
-    content = content.replace(regex, zh);
-  }
-
-  // 截断到合理长度
-  if (content.length > config.transformation.maxContentLength) {
-    content = content.substring(0, config.transformation.maxContentLength);
-    // 在最后一个完整句子处截断
-    const lastPeriod = Math.max(
-      content.lastIndexOf('。'),
-      content.lastIndexOf('. '),
-      content.lastIndexOf('！'),
-      content.lastIndexOf('？')
-    );
-    if (lastPeriod > content.length * 0.7) {
-      content = content.substring(0, lastPeriod + 1);
-    }
-    content += '\n\n（更多详情请查看原文链接）';
-  }
-
-  return content;
-}
-
-/**
- * 生成摘要
- */
-function generateSummary(content) {
-  if (!content) return '';
-
-  // 提取前几句作为摘要
-  const sentences = content.split(/[.。！？!?]+/).filter((s) => s.trim().length > 10);
-  let summary = '';
-
-  for (const sentence of sentences) {
-    if (summary.length + sentence.length > config.transformation.maxSummaryLength) {
-      break;
-    }
-    summary += sentence.trim() + '。';
-  }
-
-  return summary || content.substring(0, config.transformation.maxSummaryLength) + '...';
-}
-
-/**
- * 从内容中提取健康建议/实用提示
- */
-function extractHealthTips(content, category) {
-  const tips = [];
-  const text = (content || '').toLowerCase();
-
-  // 基于分类生成通用健康提示
-  const categoryTips = {
-    nutrition: [
-      '均衡饮食是健康的基础，建议每天摄入多种颜色的蔬果',
-      '控制盐分和糖分摄入，有助于预防慢性疾病',
-      '适量饮水，成年人每天建议饮水1500-1700毫升',
-    ],
-    fitness: [
-      '每周至少进行150分钟中等强度有氧运动',
-      '运动前做好热身，运动后注意拉伸放松',
-      '中老年人适合太极拳、散步、游泳等低冲击运动',
-    ],
-    disease_prevention: [
-      '定期体检是早期发现疾病的重要手段',
-      '保持良好的生活习惯是预防疾病的最佳方式',
-      '注意个人卫生，养成勤洗手的好习惯',
-    ],
-    mental_health: [
-      '保证充足的睡眠，成年人每天建议睡7-8小时',
-      '适当社交活动有助于维护心理健康',
-      '感到持续焦虑或抑郁时，建议寻求专业帮助',
-    ],
-    rehabilitation: [
-      '康复训练需要在专业指导下进行',
-      '循序渐进，不要操之过急',
-      '保持积极乐观的心态有助于康复',
-    ],
-    elderly_care: [
-      '中老年人应定期检查血压、血糖和血脂',
-      '注意防跌倒，保持家中环境安全整洁',
-      '适度进行脑力活动，如阅读、下棋等，有助于延缓认知衰退',
-    ],
-    medical_research: ['科研成果从实验室到临床应用需要时间，请理性看待', '有健康问题请咨询专业医生，勿自行用药'],
-    wellness: ['养成规律作息的好习惯', '保持心情愉悦，适当参加社交活动', '中医养生讲究"治未病"，重在预防'],
-    public_health: ['关注官方卫生部门发布的健康信息', '理性看待健康新闻，不信谣不传谣'],
-    traditional_medicine: [
-      '中医养生讲究因人而异，建议在专业中医师指导下调理',
-      '药食同源，日常饮食中可适当加入养生食材',
-    ],
-  };
-
-  const relevantTips = categoryTips[category] || categoryTips.wellness;
-
-  // 随机选取1-2条提示
-  const shuffled = relevantTips.sort(() => Math.random() - 0.5);
-  tips.push(...shuffled.slice(0, 2));
-
-  // 添加免责声明
-  tips.push('温馨提示：本文内容仅供参考，不构成医疗建议。如有健康问题，请咨询专业医生。');
-
-  return tips;
-}
-
-/**
  * 提取标签
  */
 function extractTags(title, content) {
   const text = `${title} ${content}`.toLowerCase();
   const tags = new Set();
 
-  for (const [term, zh] of Object.entries(HEALTH_TERMS)) {
+  for (const [term, zh] of Object.entries(HEALTH_DICT)) {
     if (text.includes(term.toLowerCase())) {
-      // 使用简短的中文标签
       const shortTag = zh.replace(/（.*?）/g, '').trim();
-      if (shortTag.length <= 6) {
+      if (shortTag.length >= 2 && shortTag.length <= 6) {
         tags.add(shortTag);
       }
     }
   }
 
-  // 限制标签数量
   return Array.from(tags).slice(0, 8);
 }
 
 /**
- * 转换单篇文章
+ * 生成面向中老年人的实用健康建议
+ */
+function generateHealthTips(content, category) {
+  const tips = [];
+
+  const categoryTips = {
+    nutrition: [
+      '每天摄入12种以上食物，保证营养均衡',
+      '减少盐分摄入（每天不超过6克），预防高血压',
+      '多吃深色蔬菜和粗粮，补充膳食纤维',
+      '适量补充优质蛋白质，如鱼类、豆制品、蛋类',
+      '控制油脂摄入，优先选择橄榄油、菜籽油等植物油',
+    ],
+    fitness: [
+      '每天步行6000-8000步，维持基本体力',
+      '每周至少3次中等强度运动，每次30分钟以上',
+      '推荐太极拳、游泳、健步走等低冲击运动',
+      '运动前后充分热身和拉伸，预防运动损伤',
+      '循序渐进，不要突然剧烈运动',
+    ],
+    disease_prevention: [
+      '每年至少一次全面体检，重点关注三高指标',
+      '50岁以上建议每年做一次肠镜筛查',
+      '女性40岁以上每年做乳腺和宫颈筛查',
+      '定期监测血压、血糖，做好慢病管理',
+      '接种流感疫苗和肺炎疫苗，增强免疫力',
+    ],
+    mental_health: [
+      '保持规律作息，每天睡7-8小时',
+      '培养兴趣爱好（书法、园艺、下棋等），充实生活',
+      '多与家人朋友交流，避免孤独感',
+      '学习新技能有助于延缓认知功能下降',
+      '如持续感到低落或焦虑，请及时就医',
+    ],
+    elderly_care: [
+      '家中安装防滑垫和扶手，预防跌倒',
+      '定期检查视力和听力，及时佩戴辅助器具',
+      '保持社交活跃，参加社区活动',
+      '每天做简单的脑力练习（阅读、猜谜等）',
+      '注意保暖，气温变化时增减衣物',
+    ],
+    chronic_disease: [
+      '遵医嘱按时服药，不要自行停药或调整剂量',
+      '定期复查，监测各项指标变化',
+      '控制饮食与适度运动是慢病管理的基础',
+      '记录每日血压/血糖数据，就诊时提供给医生参考',
+    ],
+    rehabilitation: [
+      '康复训练需在专业指导下进行',
+      '循序渐进，急于求成反而不利恢复',
+      '保持积极乐观的心态是康复的重要因素',
+      '注意营养补充，康复期需要充足的蛋白质',
+    ],
+    medical_research: [
+      '科研成果转化为临床应用通常需要数年时间，请理性看待',
+      '不要因为一篇研究就改变用药方案，请咨询主治医生',
+      '关注权威医学期刊和机构发布的信息',
+    ],
+    wellness: [
+      '作息规律是养生的根本',
+      '保持心情愉悦，情绪健康与身体健康密切相关',
+      '春捂秋冻要适度，根据个人体质调整',
+    ],
+    public_health: [
+      '关注国家卫健委等官方渠道发布的健康信息',
+      '不信谣不传谣，科学理性看待健康新闻',
+    ],
+    traditional_medicine: [
+      '中医养生因人而异，建议在专业中医师指导下调理',
+      '药食同源，日常可适当食用山药、枸杞、红枣等食材',
+      '中西医结合往往效果更好，不要排斥任何一方',
+    ],
+  };
+
+  const relevant = categoryTips[category] || categoryTips.wellness;
+  const shuffled = relevant.sort(() => Math.random() - 0.5);
+  tips.push(...shuffled.slice(0, 2));
+
+  tips.push('⚕️ 免责声明：本文内容来源于国际科研资讯，仅供健康参考，不能替代医生的专业诊疗意见。如有健康问题，请及时就医。');
+
+  return tips;
+}
+
+/**
+ * 转换单篇文章（完整流程）
  */
 function transformArticle(article) {
-  const title = transformTitle(article.original_title);
-  const content = transformContent(article.original_content, article.category);
-  const summary = generateSummary(content);
-  const category = detectCategory(article.original_title, article.original_content);
-  const audience = detectAudience(article.original_title, article.original_content);
-  const tags = extractTags(article.original_title, article.original_content);
-  const healthTips = extractHealthTips(article.original_content, category);
+  const originalTitle = article.original_title || '';
+  const originalContent = article.original_content || '';
+
+  // 1. 翻译
+  const title = translateTitle(originalTitle);
+  const content = translateContent(originalContent);
+
+  // 2. 生成中文摘要
+  const summary = generateChineseSummary(
+    originalTitle, originalContent,
+    config.transformation.maxSummaryLength
+  );
+
+  // 3. 分类与受众
+  const category = detectCategory(originalTitle, originalContent);
+  const audience = detectAudience(originalTitle, originalContent);
+
+  // 4. 提取标签
+  const tags = extractTags(originalTitle, originalContent);
+
+  // 5. 提取关键要点
+  const keyPoints = extractKeyPoints(originalTitle, originalContent);
+
+  // 6. 评估可信度
+  const credibility = assessCredibility(article.source_name, originalContent);
+
+  // 7. 生成健康建议
+  const healthTips = generateHealthTips(originalContent, category);
+
+  // 8. 截断内容到合理长度
+  let finalContent = content;
+  if (finalContent.length > config.transformation.maxContentLength) {
+    finalContent = finalContent.substring(0, config.transformation.maxContentLength);
+    const lastPeriod = Math.max(
+      finalContent.lastIndexOf('。'),
+      finalContent.lastIndexOf('. '),
+    );
+    if (lastPeriod > finalContent.length * 0.7) {
+      finalContent = finalContent.substring(0, lastPeriod + 1);
+    }
+    finalContent += '\n\n（更多详情请查看原文链接）';
+  }
+
+  // 9. 在内容前添加要点和可信度
+  let enrichedContent = '';
+
+  if (credibility) {
+    enrichedContent += `📊 信息可信度：${credibility.label}`;
+    if (credibility.factors.length > 0) {
+      enrichedContent += `（${credibility.factors.join('、')}）`;
+    }
+    enrichedContent += '\n\n';
+  }
+
+  if (keyPoints.length > 0) {
+    enrichedContent += '📌 核心要点：\n';
+    keyPoints.forEach((point, i) => {
+      enrichedContent += `${i + 1}. ${point}\n`;
+    });
+    enrichedContent += '\n';
+  }
+
+  enrichedContent += finalContent;
 
   return {
     title,
     summary,
-    content,
+    content: enrichedContent,
     category,
     audience: JSON.stringify(audience),
     tags: JSON.stringify(tags),
     health_tips: JSON.stringify(healthTips),
+    key_points: JSON.stringify(keyPoints),
+    credibility_score: credibility ? credibility.score : 0,
+    credibility_level: credibility ? credibility.level : 'medium',
+    credibility_factors: credibility ? JSON.stringify(credibility.factors) : '[]',
   };
 }
 
 /**
- * 批量转换待处理的文章
+ * 批量转换待处理文章
  */
 function transformPendingArticles(limit = 50) {
   const db = getDatabase();
   const pending = db
-    .prepare(
-      `SELECT * FROM articles WHERE status = 'pending' ORDER BY aggregated_at DESC LIMIT ?`
-    )
+    .prepare("SELECT * FROM articles WHERE status = 'pending' ORDER BY aggregated_at DESC LIMIT ?")
     .all(limit);
 
   console.log(`[转换] 开始处理 ${pending.length} 篇待转换文章...`);
@@ -471,6 +325,10 @@ function transformPendingArticles(limit = 50) {
       audience = @audience,
       tags = @tags,
       health_tips = @health_tips,
+      key_points = @key_points,
+      credibility_score = @credibility_score,
+      credibility_level = @credibility_level,
+      credibility_factors = @credibility_factors,
       status = 'transformed',
       transformed_at = CURRENT_TIMESTAMP
     WHERE id = @id
@@ -497,11 +355,11 @@ function transformPendingArticles(limit = 50) {
 module.exports = {
   transformArticle,
   transformPendingArticles,
-  transformTitle,
-  transformContent,
-  generateSummary,
+  translateTitle,
+  translateContent: translateContent,
+  generateChineseSummary,
   detectCategory,
   detectAudience,
   extractTags,
-  extractHealthTips,
+  extractHealthTips: generateHealthTips,
 };
