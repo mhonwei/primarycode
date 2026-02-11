@@ -1,23 +1,24 @@
 const RSSParser = require('rss-parser');
 const config = require('../config');
 const { getDatabase } = require('../database');
+const { scrapeSource } = require('./scraper');
 
 const rssParser = new RSSParser({
-  timeout: 15000,
+  timeout: config.aggregation.requestTimeout || 15000,
   headers: {
-    'User-Agent': 'HealthNewsAggregator/1.0',
-    Accept: 'application/rss+xml, application/xml, text/xml',
+    'User-Agent': 'Mozilla/5.0 (compatible; HealthNewsBot/2.0)',
+    Accept: 'application/rss+xml, application/xml, text/xml, */*',
   },
 });
 
 /**
  * 从单个 RSS 源采集文章
  */
-async function fetchFromSource(source) {
+async function fetchFromRSS(source) {
   const results = { found: 0, added: 0, errors: [] };
 
   try {
-    console.log(`[采集] 正在从 ${source.name} 获取内容...`);
+    console.log(`[采集-RSS] 正在从 ${source.name} 获取内容...`);
     const feed = await rssParser.parseURL(source.url);
     const items = feed.items.slice(0, config.aggregation.maxArticlesPerSource);
     results.found = items.length;
@@ -52,14 +53,66 @@ async function fetchFromSource(source) {
       }
     }
 
-    console.log(`[采集] ${source.name}: 发现 ${results.found} 篇, 新增 ${results.added} 篇`);
+    console.log(`[采集-RSS] ${source.name}: 发现 ${results.found} 篇, 新增 ${results.added} 篇`);
   } catch (err) {
     const errorMsg = `源 ${source.name} 采集失败: ${err.message}`;
-    console.error(`[采集] ${errorMsg}`);
+    console.error(`[采集-RSS] ${errorMsg}`);
     results.errors.push(errorMsg);
   }
 
   return results;
+}
+
+/**
+ * 从单个网页源采集文章
+ */
+async function fetchFromWeb(source) {
+  const results = { found: 0, added: 0, errors: [] };
+
+  try {
+    const scrapeResults = await scrapeSource(source);
+    results.found = scrapeResults.found;
+    results.errors = scrapeResults.errors;
+
+    const db = getDatabase();
+    const insertStmt = db.prepare(`
+      INSERT OR IGNORE INTO articles
+        (source_name, source_url, original_title, original_content, original_link,
+         original_language, category, published_at, status)
+      VALUES
+        (@source_name, @source_url, @original_title, @original_content, @original_link,
+         @original_language, @category, @published_at, 'pending')
+    `);
+
+    for (const article of scrapeResults.articles) {
+      try {
+        const result = insertStmt.run(article);
+        if (result.changes > 0) {
+          results.added++;
+        }
+      } catch (err) {
+        results.errors.push(`文章 "${article.original_title}": ${err.message}`);
+      }
+    }
+
+    console.log(`[采集-Web] ${source.name}: 发现 ${results.found} 篇, 新增 ${results.added} 篇`);
+  } catch (err) {
+    const errorMsg = `源 ${source.name} 抓取失败: ${err.message}`;
+    console.error(`[采集-Web] ${errorMsg}`);
+    results.errors.push(errorMsg);
+  }
+
+  return results;
+}
+
+/**
+ * 从单个源采集（自动判断类型）
+ */
+async function fetchFromSource(source) {
+  if (source.type === 'web') {
+    return fetchFromWeb(source);
+  }
+  return fetchFromRSS(source);
 }
 
 /**
@@ -71,8 +124,8 @@ async function runAggregation() {
   console.log(`${'='.repeat(60)}`);
 
   const db = getDatabase();
-  const sources = config.aggregation.rssSources;
-  const totalResults = { sourcesProcessed: 0, totalFound: 0, totalAdded: 0, errors: [] };
+  const sources = config.aggregation.sources;
+  const totalResults = { sourcesProcessed: 0, totalFound: 0, totalAdded: 0, errors: [], successSources: [] };
 
   for (const source of sources) {
     const logEntry = db
@@ -86,6 +139,10 @@ async function runAggregation() {
     totalResults.totalFound += results.found;
     totalResults.totalAdded += results.added;
     totalResults.errors.push(...results.errors);
+
+    if (results.added > 0) {
+      totalResults.successSources.push(source.name);
+    }
 
     db.prepare(
       `UPDATE aggregation_logs
@@ -101,6 +158,9 @@ async function runAggregation() {
   console.log(`  - 处理源: ${totalResults.sourcesProcessed}/${sources.length}`);
   console.log(`  - 发现文章: ${totalResults.totalFound}`);
   console.log(`  - 新增文章: ${totalResults.totalAdded}`);
+  if (totalResults.successSources.length > 0) {
+    console.log(`  - 成功采集: ${totalResults.successSources.join(', ')}`);
+  }
   if (totalResults.errors.length > 0) {
     console.log(`  - 错误数: ${totalResults.errors.length}`);
   }
@@ -172,6 +232,8 @@ function getAggregationStats() {
 module.exports = {
   runAggregation,
   fetchFromSource,
+  fetchFromRSS,
+  fetchFromWeb,
   getPendingArticles,
   getAggregationStats,
   cleanOldArticles,

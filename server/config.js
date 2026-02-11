@@ -13,57 +13,149 @@ module.exports = {
     // 采集间隔（cron 表达式）: 默认每天早上 6:00 和下午 18:00 各采集一次
     schedule: process.env.CRON_SCHEDULE || '0 6,18 * * *',
 
-    // RSS 源列表 - 健康/科学/养生类
-    rssSources: [
+    // ===== 数据源列表 =====
+    // type: 'rss' = RSS订阅, 'web' = 网页抓取
+    sources: [
+      // --- 国内健康资讯源（国内网络可直接访问） ---
+      {
+        name: '人民网健康',
+        url: 'http://health.people.com.cn/rss/health.xml',
+        type: 'rss',
+        category: 'public_health',
+        language: 'zh',
+      },
+      {
+        name: '丁香医生',
+        url: 'https://dxy.com',
+        type: 'web',
+        category: 'wellness',
+        language: 'zh',
+        scrapeConfig: {
+          listUrl: 'https://www.dxy.cn/column/health',
+          articleSelector: '.health-article-item, .article-item, article a',
+          titleSelector: 'h2, h3, .title',
+          linkAttr: 'href',
+          baseUrl: 'https://www.dxy.cn',
+        },
+      },
+      {
+        name: '健康时报',
+        url: 'https://www.jksb.com.cn',
+        type: 'web',
+        category: 'wellness',
+        language: 'zh',
+        scrapeConfig: {
+          listUrl: 'https://www.jksb.com.cn/html/diseases/',
+          articleSelector: '.list-item a, .article-list a, .news-list li a',
+          titleSelector: '',
+          linkAttr: 'href',
+          baseUrl: 'https://www.jksb.com.cn',
+        },
+      },
+      {
+        name: '中国疾控中心',
+        url: 'https://www.chinacdc.cn',
+        type: 'web',
+        category: 'disease_prevention',
+        language: 'zh',
+        scrapeConfig: {
+          listUrl: 'https://www.chinacdc.cn/jkzt/',
+          articleSelector: '.list_item a, .listBox a, .conBox li a',
+          titleSelector: '',
+          linkAttr: 'href',
+          baseUrl: 'https://www.chinacdc.cn',
+        },
+      },
+
+      // --- 国际权威健康源（需国际网络） ---
       {
         name: 'Medical News Today',
         url: 'https://www.medicalnewstoday.com/rss',
+        type: 'rss',
         category: 'medical_research',
         language: 'en',
       },
       {
         name: 'WHO News',
         url: 'https://www.who.int/rss-feeds/news-english.xml',
+        type: 'rss',
         category: 'public_health',
         language: 'en',
       },
       {
         name: 'Harvard Health Blog',
         url: 'https://www.health.harvard.edu/blog/feed',
+        type: 'rss',
         category: 'wellness',
         language: 'en',
       },
       {
         name: 'ScienceDaily Health',
         url: 'https://www.sciencedaily.com/rss/health_medicine.xml',
+        type: 'rss',
         category: 'medical_research',
         language: 'en',
       },
       {
         name: 'NIH Research Matters',
         url: 'https://www.nih.gov/news-events/nih-research-matters/feed',
+        type: 'rss',
         category: 'medical_research',
         language: 'en',
       },
       {
         name: 'Nature Medicine',
         url: 'https://www.nature.com/nm.rss',
+        type: 'rss',
         category: 'medical_research',
         language: 'en',
       },
       {
+        name: 'PubMed Trending',
+        url: 'https://pubmed.ncbi.nlm.nih.gov/trending/',
+        type: 'web',
+        category: 'medical_research',
+        language: 'en',
+        scrapeConfig: {
+          listUrl: 'https://pubmed.ncbi.nlm.nih.gov/trending/',
+          articleSelector: '.docsum-content',
+          titleSelector: '.docsum-title',
+          linkSelector: 'a',
+          linkAttr: 'href',
+          baseUrl: 'https://pubmed.ncbi.nlm.nih.gov',
+          summarySelector: '.full-view-snippet',
+        },
+      },
+      {
         name: 'WebMD Health',
         url: 'https://rssfeeds.webmd.com/rss/rss.aspx?RSSSource=RSS_PUBLIC',
+        type: 'rss',
         category: 'wellness',
         language: 'en',
       },
     ],
+
+    // 保留旧字段兼容（指向sources中type=rss的项）
+    get rssSources() {
+      return this.sources.filter(s => s.type === 'rss');
+    },
+
+    // 网页抓取源
+    get webSources() {
+      return this.sources.filter(s => s.type === 'web');
+    },
 
     // 每个源最多获取的文章数
     maxArticlesPerSource: 20,
 
     // 文章保留天数
     retentionDays: 90,
+
+    // 请求超时（毫秒）
+    requestTimeout: 15000,
+
+    // 请求间隔（毫秒），避免被封
+    requestDelay: 2000,
   },
 
   // 内容分类（面向中老年人优化排序）
