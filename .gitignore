@@ -1,0 +1,13 @@
+node_modules/
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+.DS_Store
+Thumbs.db
+*.log
+dist/
+node_portable/
+miniprogram/miniprogram_npm/

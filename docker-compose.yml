@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  health-news:
+    build: .
+    container_name: health-news-aggregator
+    ports:
+      - "3000:3000"
+    volumes:
+      # 数据持久化，防止容器重启丢失数据库
+      - health_data:/app/data
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      # 自定义采集时间（cron 表达式），默认每天 6:00 和 18:00
+      - CRON_SCHEDULE=0 6,18 * * *
+    restart: unless-stopped
+
+volumes:
+  health_data:

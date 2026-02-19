@@ -1,0 +1,59 @@
+<!-- 文章详情页 -->
+<view class="container" wx:if="{{!loading && article}}">
+  <!-- 分类标签 -->
+  <view class="category-tag">{{article.category}}</view>
+
+  <!-- 标题 -->
+  <view class="detail-title">{{article.title || article.original_title}}</view>
+
+  <!-- 元信息 -->
+  <view class="detail-meta">
+    <text>来源: {{article.source_name || '未知'}}</text>
+    <text>{{article.published_at}}</text>
+    <text>{{article.view_count || 0}} 次阅读</text>
+  </view>
+
+  <!-- 标签 -->
+  <view class="tags" wx:if="{{article.tags && article.tags.length > 0}}">
+    <text wx:for="{{article.tags}}" wx:key="*this" class="tag">{{item}}</text>
+  </view>
+
+  <!-- 正文 -->
+  <view class="detail-content">
+    <text>{{article.content || article.original_content || '暂无详细内容'}}</text>
+  </view>
+
+  <!-- 健康提示 -->
+  <view wx:if="{{article.health_tips && article.health_tips.length > 0}}" class="health-tips">
+    <view class="tips-title">💡 健康小贴士</view>
+    <view wx:for="{{article.health_tips}}" wx:key="*this" class="tips-item">
+      <text>✓ {{item}}</text>
+    </view>
+  </view>
+
+  <!-- 操作栏 -->
+  <view class="action-bar">
+    <view class="action-btn {{isLiked ? 'liked' : ''}}" bindtap="onLike">
+      <text class="action-icon">{{isLiked ? '❤️' : '🤍'}}</text>
+      <text>{{article.like_count || 0}} 赞</text>
+    </view>
+    <button class="action-btn share-btn" open-type="share" bindtap="onShare">
+      <text class="action-icon">📤</text>
+      <text>分享</text>
+    </button>
+    <view class="action-btn" bindtap="onViewOriginal">
+      <text class="action-icon">🔗</text>
+      <text>原文</text>
+    </view>
+  </view>
+</view>
+
+<!-- 加载状态 -->
+<view wx:if="{{loading}}" class="loading">加载中...</view>
+
+<!-- 错误状态 -->
+<view wx:if="{{!loading && !article}}" class="empty-state">
+  <view class="empty-icon">😔</view>
+  <view class="empty-text">文章加载失败</view>
+  <view class="empty-hint">请返回重试</view>
+</view>

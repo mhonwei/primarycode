@@ -1,0 +1,31 @@
+<!-- 热门资讯页面 -->
+<view class="container">
+  <view class="article-list">
+    <view
+      wx:for="{{articles}}"
+      wx:key="id"
+      class="article-card"
+      data-id="{{item.id}}"
+      bindtap="onArticleTap"
+    >
+      <view class="rank-badge">{{index + 1}}</view>
+      <view class="article-info">
+        <view class="category-tag">{{item.category}}</view>
+        <view class="article-title">{{item.title || item.original_title}}</view>
+        <view class="article-summary">{{item.summary}}</view>
+        <view class="meta-info">
+          <text>{{item.source_name}}</text>
+          <text class="stats">👁 {{item.view_count}} · ❤️ {{item.like_count}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading">加载中...</view>
+
+  <view wx:if="{{!loading && articles.length === 0}}" class="empty-state">
+    <view class="empty-icon">📊</view>
+    <view class="empty-text">暂无热门资讯</view>
+    <view class="empty-hint">资讯采集后将在此展示热门内容</view>
+  </view>
+</view>
