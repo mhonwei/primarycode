@@ -65,8 +65,8 @@ describe('Database', () => {
 });
 
 describe('Content Transformer', () => {
-  it('should transform health-related titles', () => {
-    const result = translateTitle('New Study Shows diabetes Treatment Breakthrough');
+  it('should transform health-related titles', async () => {
+    const result = await translateTitle('New Study Shows diabetes Treatment Breakthrough');
     assert.ok(result.includes('糖尿病'), 'Should translate diabetes to Chinese');
   });
 
@@ -103,10 +103,10 @@ describe('Content Transformer', () => {
     assert.ok(tags.includes('糖尿病'), 'Should include diabetes tag in Chinese');
   });
 
-  it('should generate a summary from content', () => {
+  it('should generate a summary from content', async () => {
     const content =
       'This is a very important health study. It shows that regular exercise reduces the risk of heart disease. Walking 30 minutes daily is recommended.';
-    const summary = generateChineseSummary('Health Study', content);
+    const summary = await generateChineseSummary('Health Study', content);
     assert.ok(summary.length > 0, 'Summary should not be empty');
     assert.ok(summary.length <= 600, 'Summary should be within length limits');
   });
@@ -120,7 +120,7 @@ describe('Content Transformer', () => {
     );
   });
 
-  it('should transform a complete article', () => {
+  it('should transform a complete article', async () => {
     const article = {
       id: 1,
       original_title: 'New diabetes research shows promising results',
@@ -129,7 +129,7 @@ describe('Content Transformer', () => {
       category: 'medical_research',
     };
 
-    const result = transformArticle(article);
+    const result = await transformArticle(article);
     assert.ok(result.title, 'Should have a title');
     assert.ok(result.summary, 'Should have a summary');
     assert.ok(result.content, 'Should have content');

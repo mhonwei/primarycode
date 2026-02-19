@@ -1,15 +1,122 @@
 /**
  * 英文→中文翻译服务
  *
- * 提供多种翻译策略：
- * 1. 内置词典 + 规则翻译（免费，离线可用）
- * 2. 预留外部翻译 API 接口（百度翻译、DeepL 等，需 API Key）
- * 3. 预留大模型 API 接口（Claude、文心一言等，效果最好）
+ * 翻译策略（按优先级）：
+ * 1. 百度翻译API（免费标准版，每秒1次，每月5万字符免费）
+ * 2. 内置词典翻译（离线兜底）
  *
- * 当前默认使用内置词典翻译，后续接入 API 后效果会大幅提升。
+ * 配置方式（在 .env 或环境变量中设置）：
+ *   BAIDU_TRANSLATE_APPID=你的appid
+ *   BAIDU_TRANSLATE_SECRET=你的密钥
+ *
+ * 申请地址：https://fanyi-api.baidu.com/
+ * 选「通用文本翻译」→「标准版」（免费）
  */
 
+const crypto = require('crypto');
 const config = require('../config');
+
+// ===== 百度翻译 API 配置 =====
+const BAIDU_API_URL = 'https://fanyi-api.baidu.com/api/trans/vip/translate';
+const BAIDU_APPID = process.env.BAIDU_TRANSLATE_APPID || '';
+const BAIDU_SECRET = process.env.BAIDU_TRANSLATE_SECRET || '';
+
+// 限流：标准版每秒1次请求
+let lastApiCall = 0;
+const API_INTERVAL = 1100; // 毫秒
+
+/**
+ * 检查是否配置了百度翻译API
+ */
+function isBaiduConfigured() {
+  return BAIDU_APPID && BAIDU_SECRET;
+}
+
+/**
+ * 调用百度翻译API
+ */
+async function baiduTranslate(text, from = 'auto', to = 'zh') {
+  if (!isBaiduConfigured()) return null;
+  if (!text || text.trim().length === 0) return '';
+
+  // 限流等待
+  const now = Date.now();
+  const waitTime = API_INTERVAL - (now - lastApiCall);
+  if (waitTime > 0) {
+    await new Promise(r => setTimeout(r, waitTime));
+  }
+  lastApiCall = Date.now();
+
+  const salt = Date.now().toString();
+  const sign = crypto
+    .createHash('md5')
+    .update(BAIDU_APPID + text + salt + BAIDU_SECRET)
+    .digest('hex');
+
+  const params = new URLSearchParams({
+    q: text,
+    from,
+    to,
+    appid: BAIDU_APPID,
+    salt,
+    sign,
+  });
+
+  try {
+    const response = await fetch(`${BAIDU_API_URL}?${params}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+
+    const data = await response.json();
+
+    if (data.error_code) {
+      console.error(`[翻译API] 百度翻译错误: ${data.error_code} - ${data.error_msg}`);
+      return null; // 回退到词典翻译
+    }
+
+    if (data.trans_result && data.trans_result.length > 0) {
+      return data.trans_result.map(r => r.dst).join('\n');
+    }
+
+    return null;
+  } catch (err) {
+    console.error(`[翻译API] 请求失败: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * 分段翻译长文本（百度API单次限制6000字节）
+ */
+async function baiduTranslateLong(text, from = 'auto', to = 'zh') {
+  if (!text) return null;
+
+  // 按句号分段，每段不超过4000字符
+  const maxLen = 4000;
+  const segments = [];
+  let current = '';
+
+  const sentences = text.split(/(?<=[.!?。！？\n])\s*/);
+  for (const s of sentences) {
+    if (current.length + s.length > maxLen && current) {
+      segments.push(current);
+      current = s;
+    } else {
+      current += (current ? ' ' : '') + s;
+    }
+  }
+  if (current) segments.push(current);
+
+  const results = [];
+  for (const segment of segments) {
+    const translated = await baiduTranslate(segment, from, to);
+    if (translated === null) return null; // API失败，回退
+    results.push(translated);
+  }
+
+  return results.join('\n');
+}
 
 // ===== 健康领域专业词典（英→中）=====
 const HEALTH_DICT = {
@@ -112,7 +219,7 @@ const HEALTH_DICT = {
   outcome: '结果', conclusion: '结论', recommendation: '建议',
 };
 
-// 按词长度排序（长词优先匹配，避免短词误匹配）
+// 按词长度排序（长词优先匹配）
 const SORTED_TERMS = Object.entries(HEALTH_DICT)
   .sort((a, b) => b[0].length - a[0].length);
 
@@ -136,42 +243,70 @@ function escapeRegex(str) {
 }
 
 /**
- * 翻译标题 - 术语替换 + 格式化
+ * 检测文本是否主要是中文
  */
-function translateTitle(title) {
+function isChinese(text) {
+  if (!text) return false;
+  const cn = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const total = text.replace(/\s/g, '').length;
+  return total > 0 && cn / total > 0.3;
+}
+
+/**
+ * 翻译标题（优先API翻译，降级词典翻译）
+ */
+async function translateTitle(title) {
   if (!title) return '';
 
-  let translated = translateWithDict(title);
+  // 中文标题不需要翻译
+  if (isChinese(title)) return title;
 
-  // 判断翻译覆盖率
-  const originalWords = title.split(/\s+/).length;
-  const chineseChars = (translated.match(/[\u4e00-\u9fff]/g) || []).length;
-
-  // 如果翻译覆盖率较低，保留双语
-  if (chineseChars < 4 && originalWords > 5) {
-    return `${translated}\n（原文：${title}）`;
+  // 尝试API翻译
+  if (isBaiduConfigured()) {
+    const result = await baiduTranslate(title, 'en', 'zh');
+    if (result) return result;
   }
 
+  // 降级：词典翻译
+  let translated = translateWithDict(title);
+  const chineseChars = (translated.match(/[\u4e00-\u9fff]/g) || []).length;
+  if (chineseChars < 4) {
+    return `【健康资讯】${translated}`;
+  }
   return translated;
 }
 
 /**
- * 翻译正文内容 - 分段翻译 + 术语替换
+ * 翻译正文内容（优先API翻译，降级词典翻译）
  */
-function translateContent(content) {
+async function translateContent(content) {
   if (!content) return '';
+
+  // 中文内容不需要翻译
+  if (isChinese(content)) return content;
+
+  // 尝试API翻译
+  if (isBaiduConfigured()) {
+    const result = await baiduTranslateLong(content, 'en', 'zh');
+    if (result) return result;
+  }
+
+  // 降级：词典翻译
   return translateWithDict(content);
 }
 
 /**
- * 生成中文摘要提取要点
- * 从翻译后的内容中提取关键信息，生成结构化摘要
+ * 生成中文摘要
  */
-function generateChineseSummary(title, content, maxLength = 500) {
-  const text = translateWithDict(`${title}. ${content}`);
+async function generateChineseSummary(title, content, maxLength = 500) {
+  // 先翻译
+  const translatedTitle = await translateTitle(title);
+  const translatedContent = await translateContent(content);
 
-  // 分句
-  const sentences = text.split(/[.。！？!?]+/)
+  const text = `${translatedTitle}。${translatedContent}`;
+
+  // 分句提取
+  const sentences = text.split(/[.。！？!?\n]+/)
     .map(s => s.trim())
     .filter(s => s.length > 10);
 
@@ -187,13 +322,12 @@ function generateChineseSummary(title, content, maxLength = 500) {
 }
 
 /**
- * 提取文章关键要点（适合中老年人快速阅读）
+ * 提取文章关键要点
  */
 function extractKeyPoints(title, content) {
   const text = `${title} ${content}`.toLowerCase();
   const points = [];
 
-  // 查找结论性语句
   const conclusionPatterns = [
     /(?:study|research|trial|findings?)\s+(?:found|showed?|demonstrated?|revealed?|suggests?|indicates?)\s+(?:that\s+)?(.{20,150})/gi,
     /(?:results?|data|evidence)\s+(?:showed?|suggests?|indicates?)\s+(?:that\s+)?(.{20,150})/gi,
@@ -207,7 +341,6 @@ function extractKeyPoints(title, content) {
     while ((match = pattern.exec(text)) !== null) {
       let point = translateWithDict(match[0]);
       if (point.length > 15 && points.length < 5) {
-        // 首字母大写 → 中文格式
         point = point.charAt(0).toUpperCase() + point.slice(1);
         if (!points.some(p => p.includes(point.substring(0, 20)))) {
           points.push(point);
@@ -225,15 +358,16 @@ function extractKeyPoints(title, content) {
 function assessCredibility(sourceName, content) {
   const text = `${sourceName} ${content}`.toLowerCase();
 
-  let score = 50; // 基准分
+  let score = 50;
   const factors = [];
 
-  // 权威来源加分
   const authoritative = {
     'nature': 30, 'lancet': 30, 'nejm': 30, 'bmj': 30, 'jama': 30,
     'who': 25, 'nih': 25, 'cdc': 25, 'harvard': 20,
     'mayo clinic': 20, 'johns hopkins': 20, 'oxford': 20,
     'sciencedaily': 15, 'medical news today': 10, 'webmd': 10,
+    '人民网': 20, '丁香': 15, '疾控中心': 25, '健康时报': 10,
+    'pubmed': 20,
   };
 
   for (const [source, bonus] of Object.entries(authoritative)) {
@@ -244,57 +378,34 @@ function assessCredibility(sourceName, content) {
     }
   }
 
-  // 有临床试验数据加分
-  if (/clinical trial|randomized|controlled trial|double.blind/i.test(text)) {
+  if (/clinical trial|randomized|controlled trial|double.blind|临床试验|随机对照/i.test(text)) {
     score += 15;
     factors.push('有临床试验支持');
   }
 
-  // 有同行评审加分
-  if (/peer.review|published in|journal/i.test(text)) {
+  if (/peer.review|published in|journal|同行评审|发表于/i.test(text)) {
     score += 10;
     factors.push('经同行评审');
   }
 
-  // 有具体数据/样本量加分
-  if (/\d+\s*(?:participants?|patients?|subjects?|people|adults)/i.test(text)) {
+  if (/\d+\s*(?:participants?|patients?|subjects?|people|adults|万人|例|名)/i.test(text)) {
     score += 10;
     factors.push('有具体研究数据');
   }
 
-  // 荟萃分析/系统综述加分
-  if (/meta.analysis|systematic review/i.test(text)) {
+  if (/meta.analysis|systematic review|荟萃分析|系统综述/i.test(text)) {
     score += 15;
     factors.push('荟萃分析/系统综述');
   }
 
-  // 限制分数范围
   score = Math.min(100, Math.max(10, score));
 
-  // 可信度等级
   let level, label;
   if (score >= 80) { level = 'high'; label = '高可信度'; }
   else if (score >= 60) { level = 'medium'; label = '中等可信度'; }
   else { level = 'low'; label = '仅供参考'; }
 
   return { score, level, label, factors };
-}
-
-// 外部翻译 API 接口（预留）
-async function translateWithAPI(text, apiConfig) {
-  // 预留接口：接入百度翻译、DeepL、或大模型 API
-  // 当配置了 API Key 时使用外部翻译，否则回退到词典翻译
-  //
-  // 百度翻译 API 示例：
-  //   POST https://fanyi-api.baidu.com/api/trans/vip/translate
-  //   参数: q=text, from=en, to=zh, appid=xxx, salt=xxx, sign=xxx
-  //
-  // Claude API 示例（推荐，翻译+改写一步到位）：
-  //   POST https://api.anthropic.com/v1/messages
-  //   请求将文章翻译并改写为面向中老年人的健康科普
-  //
-  // 暂时使用词典翻译
-  return translateWithDict(text);
 }
 
 module.exports = {
@@ -304,6 +415,8 @@ module.exports = {
   generateChineseSummary,
   extractKeyPoints,
   assessCredibility,
-  translateWithAPI,
+  baiduTranslate,
+  isBaiduConfigured,
+  isChinese,
   HEALTH_DICT,
 };

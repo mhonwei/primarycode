@@ -16,8 +16,8 @@ async function main() {
     // 运行采集
     await runAggregation();
 
-    // 转换文章
-    transformPendingArticles();
+    // 转换文章（异步：支持百度翻译API）
+    await transformPendingArticles();
 
     console.log('\n采集脚本执行完毕');
   } catch (err) {

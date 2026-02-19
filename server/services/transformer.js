@@ -6,6 +6,7 @@ const {
   generateChineseSummary,
   extractKeyPoints,
   assessCredibility,
+  isChinese,
   HEALTH_DICT,
 } = require('./translator');
 
@@ -22,44 +23,54 @@ const CATEGORY_KEYWORDS = {
     'diet', 'nutrition', 'food', 'eat', 'vitamin', 'supplement', 'protein',
     'fiber', 'calorie', 'meal', 'fruit', 'vegetable', 'omega', 'mineral',
     'probiotic', 'Mediterranean', 'whole grain', 'antioxidant',
+    '饮食', '营养', '维生素', '蛋白质', '膳食', '食物',
   ],
   fitness: [
     'exercise', 'fitness', 'workout', 'physical activity', 'aerobic', 'yoga',
     'tai chi', 'walking', 'strength', 'flexibility', 'sports', 'swimming',
     'balance', 'resistance training',
+    '运动', '健身', '太极', '步行', '锻炼',
   ],
   disease_prevention: [
     'prevention', 'screening', 'vaccine', 'risk factor', 'early detection',
     'checkup', 'lifestyle', 'immune', 'risk reduction',
+    '预防', '筛查', '疫苗', '体检',
   ],
   mental_health: [
     'mental', 'depression', 'anxiety', 'stress', 'sleep', 'insomnia',
     'meditation', 'mindfulness', 'cognitive', 'brain health', 'mood', 'memory',
+    '心理', '抑郁', '焦虑', '睡眠', '失眠', '冥想', '认知',
   ],
   rehabilitation: [
     'rehabilitation', 'recovery', 'therapy', 'physical therapy',
     'occupational therapy', 'post-surgery', 'rehab', 'stroke recovery',
+    '康复', '理疗', '术后',
   ],
   elderly_care: [
     'elderly', 'aging', 'senior', 'older adult', 'geriatric', 'alzheimer',
     'dementia', 'osteoporosis', 'fall prevention', 'longevity', 'frailty',
     'sarcopenia', 'cognitive decline', 'healthy aging',
+    '老年', '衰老', '长寿', '痴呆', '跌倒',
   ],
   chronic_disease: [
     'diabetes', 'hypertension', 'heart disease', 'cardiovascular', 'cholesterol',
     'blood pressure', 'blood sugar', 'chronic', 'obesity', 'metabolic',
+    '糖尿病', '高血压', '心脏病', '冠心病', '胆固醇', '血糖', '慢性病', '慢病',
   ],
   medical_research: [
     'study', 'research', 'clinical trial', 'finding', 'discovery', 'breakthrough',
     'scientists', 'researchers', 'journal', 'published', 'meta-analysis',
+    '研究', '临床', '试验', '发现', '论文',
   ],
   public_health: [
     'WHO', 'public health', 'pandemic', 'epidemic', 'outbreak', 'policy',
     'regulation', 'guideline', 'population',
+    '公共卫生', '疫情', '政策', '指南',
   ],
   traditional_medicine: [
     'traditional', 'herbal', 'chinese medicine', 'acupuncture',
     'natural remedy', 'holistic', 'integrative',
+    '中医', '中药', '针灸', '穴位', '药膳', '养生',
   ],
 };
 
@@ -69,10 +80,12 @@ const AUDIENCE_KEYWORDS = {
     'senior', 'elderly', 'older', 'aging', 'retirement', 'geriatric',
     'alzheimer', 'dementia', 'osteoporosis', 'arthritis', 'longevity',
     'fall prevention', 'cognitive decline', 'memory loss',
+    '老年', '长者', '中老年', '退休',
   ],
   middle_aged: [
     'middle-aged', 'midlife', 'prevention', 'screening', 'cholesterol',
     'blood pressure', 'weight management', 'stress', 'work-life',
+    '中年', '三高', '体检',
   ],
 };
 
@@ -223,28 +236,34 @@ function generateHealthTips(content, category) {
 }
 
 /**
- * 转换单篇文章（完整流程）
+ * 转换单篇文章（完整流程，异步支持API翻译）
  */
-function transformArticle(article) {
+async function transformArticle(article) {
   const originalTitle = article.original_title || '';
   const originalContent = article.original_content || '';
 
-  // 1. 翻译
-  const title = translateTitle(originalTitle);
-  const content = translateContent(originalContent);
+  // 1. 翻译（异步，支持百度API）
+  let title, content;
+  if (isChinese(originalTitle)) {
+    title = originalTitle;
+    content = originalContent;
+  } else {
+    title = await translateTitle(originalTitle);
+    content = await translateContent(originalContent);
+  }
 
   // 2. 生成中文摘要
-  const summary = generateChineseSummary(
+  const summary = await generateChineseSummary(
     originalTitle, originalContent,
     config.transformation.maxSummaryLength
   );
 
-  // 3. 分类与受众
-  const category = detectCategory(originalTitle, originalContent);
-  const audience = detectAudience(originalTitle, originalContent);
+  // 3. 分类与受众（英文原文+中文译文一起检测，提高准确度）
+  const category = detectCategory(originalTitle + ' ' + title, originalContent + ' ' + content);
+  const audience = detectAudience(originalTitle + ' ' + title, originalContent + ' ' + content);
 
   // 4. 提取标签
-  const tags = extractTags(originalTitle, originalContent);
+  const tags = extractTags(originalTitle + ' ' + title, originalContent + ' ' + content);
 
   // 5. 提取关键要点
   const keyPoints = extractKeyPoints(originalTitle, originalContent);
@@ -306,9 +325,9 @@ function transformArticle(article) {
 }
 
 /**
- * 批量转换待处理文章
+ * 批量转换待处理文章（异步）
  */
-function transformPendingArticles(limit = 50) {
+async function transformPendingArticles(limit = 50) {
   const db = getDatabase();
   const pending = db
     .prepare("SELECT * FROM articles WHERE status = 'pending' ORDER BY aggregated_at DESC LIMIT ?")
@@ -339,9 +358,12 @@ function transformPendingArticles(limit = 50) {
 
   for (const article of pending) {
     try {
-      const result = transformArticle(article);
+      const result = await transformArticle(article);
       updateStmt.run({ ...result, id: article.id });
       transformed++;
+      if (transformed % 5 === 0) {
+        console.log(`[转换] 已完成 ${transformed}/${pending.length} 篇`);
+      }
     } catch (err) {
       console.error(`[转换] 文章 #${article.id} 转换失败: ${err.message}`);
       errors++;
@@ -356,7 +378,7 @@ module.exports = {
   transformArticle,
   transformPendingArticles,
   translateTitle,
-  translateContent: translateContent,
+  translateContent,
   generateChineseSummary,
   detectCategory,
   detectAudience,
