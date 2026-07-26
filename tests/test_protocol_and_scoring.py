@@ -173,3 +173,98 @@ def test_grade_profile_caveat_escalates():
 def test_snapshot_hash_is_stable(snap):
     assert snap.sha256 == Snapshot().sha256
     assert len(snap.sha256) == 64
+
+
+# ------------------------------------------- per-series discrepancy (M2)
+
+
+def test_marginal_t_charges_a_bad_channel_logarithmically():
+    """The point of integrating out the scale.
+
+    Under a fixed-scale Gaussian, doubling a residual quadruples its penalty, so
+    one badly modelled channel dominates the joint likelihood and drags shared
+    parameters. Under the marginal-t the penalty is logarithmic in the quadratic
+    form, so the channel reports itself as poorly modelled instead.
+    """
+    from civsim.uncertainty.sampler import (
+        DISCREPANCY_IG_A,
+        DISCREPANCY_IG_B,
+        STRUCTURAL_SCALE,
+        SeriesLik,
+    )
+
+    q_small, q_large = 1.0, 100.0
+    small = SeriesLik("s", np.array([q_small]), n=9, logdet=0.0)
+    large = SeriesLik("s", np.array([q_large]), n=9, logdet=0.0)
+
+    t_gap = float(
+        small.loglik(DISCREPANCY_IG_A, DISCREPANCY_IG_B)[0]
+        - large.loglik(DISCREPANCY_IG_A, DISCREPANCY_IG_B)[0]
+    )
+    # The shape matrix carries no scale, so M1's fixed-scale Gaussian charged
+    # Q / (2 sigma^2) -- with sigma = 6% that is a factor of ~139 on top of Q.
+    # Forgetting that factor is what makes the uniform-scale likelihood look
+    # harmless on paper and lets one channel dominate in practice.
+    gauss_gap = 0.5 * (q_large - q_small) / STRUCTURAL_SCALE**2
+    assert 0 < t_gap < gauss_gap / 100, (
+        f"marginal-t charged {t_gap:.1f} nats where a fixed-scale Gaussian "
+        f"charges {gauss_gap:.0f}; the robustness is not working"
+    )
+
+
+def test_inferred_scale_tracks_residual_size():
+    from civsim.uncertainty.sampler import (
+        DISCREPANCY_IG_A,
+        DISCREPANCY_IG_B,
+        SeriesLik,
+    )
+
+    tight = SeriesLik("s", np.array([0.5]), n=9, logdet=0.0)
+    loose = SeriesLik("s", np.array([50.0]), n=9, logdet=0.0)
+    a, b = DISCREPANCY_IG_A, DISCREPANCY_IG_B
+    assert tight.posterior_scale(a, b)[0] < loose.posterior_scale(a, b)[0]
+
+
+def test_inferred_discrepancy_separates_channels(snap):
+    """A channel the model fits badly must report a larger scale than one it
+    fits well -- otherwise the diagnostic is not measuring anything."""
+    from civsim.model import OBSERVED_SERIES, build_engine
+    from civsim.uncertainty.priors import sample_prior
+    from civsim.uncertainty.sampler import inferred_discrepancy
+
+    h = Holdout(snap, (1950.0, 1990.0), (1990.0, 2020.0), tuple(OBSERVED_SERIES))
+    for p in sample_prior(np.random.default_rng(5), 30):
+        try:
+            traj = build_engine(p, snap, t0=1950.0).run(1950.0, 1990.0)
+        except Exception:  # noqa: BLE001
+            continue
+        break
+    paths = {s: traj.series(s)[None, :] for s in OBSERVED_SERIES}
+    d = inferred_discrepancy(paths, traj.times, h.calibration(), snap)
+    assert set(d) == set(OBSERVED_SERIES)
+    assert all(v > 0 for v in d.values())
+    assert max(d.values()) > 2 * min(d.values()), (
+        "every channel reported the same discrepancy; the estimator is not "
+        "distinguishing well-modelled channels from badly modelled ones"
+    )
+
+
+# ------------------------------------------------- rolling origins (M2)
+
+
+def test_rolling_origins_never_calibrate_on_scored_years(snap):
+    from civsim.backtest.rolling import CONTROL_ORIGINS, run_rolling
+
+    with pytest.raises(ValueError, match="before origin"):
+        run_rolling(
+            origins=(1995.0,), snapshot=snap, fixed_test_start=1975.0,
+            n_draws=4, verbose=False,
+        )
+
+
+def test_control_mode_holds_the_test_window_fixed():
+    """Origins must differ only in calibration end, or the trend is confounded."""
+    from civsim.backtest.rolling import CONTROL_ORIGINS
+
+    assert len(CONTROL_ORIGINS) >= 3
+    assert list(CONTROL_ORIGINS) == sorted(CONTROL_ORIGINS)

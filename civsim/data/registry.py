@@ -81,6 +81,29 @@ SERIES_META: dict[str, SeriesMeta] = {
         grade_by_era=((1959, Grade.A),),
         note="Land-use-change emissions are excluded and are not negligible.",
     ),
+    "useful_exergy_efficiency_pct": SeriesMeta(
+        name="useful_exergy_efficiency_pct",
+        unit="% of primary energy",
+        grade=Grade.C,
+        source="Exergy analysis literature (Ayres & Warr; Brockway; Serrenho)",
+        citation=(
+            "Global primary-to-useful exergy conversion efficiency. "
+            "Reconstructed from national exergy accounts; not a measured "
+            "statistic."
+        ),
+        note=(
+            "C-grade throughout, and deliberately so. Published estimates "
+            "disagree on the LEVEL by several percentage points while agreeing "
+            "far better on the TREND, so this series constrains the slope of "
+            "conversion efficiency much more than its height. Included because "
+            "it is the one observable that responds to efficiency knowledge and "
+            "not to the service ladder, which is what identifies the two energy "
+            "channels M1 could not separate. Its C grade is the test of whether "
+            "the inferred per-series discrepancy scale keeps an uncertain "
+            "channel from contaminating the rest -- under M1's uniform 6% it "
+            "would have done exactly that."
+        ),
+    ),
     "lowcarbon_share_pct": SeriesMeta(
         name="lowcarbon_share_pct",
         unit="% of primary energy",

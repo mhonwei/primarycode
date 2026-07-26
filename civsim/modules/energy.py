@@ -181,6 +181,7 @@ class Energy(Module):
             "primary_energy_ej": primary,
             "energy_service_intensity": service,
             "conversion_efficiency": eff,
+            "useful_exergy_efficiency_pct": 100.0 * eff,
             "useful_work_ej": primary * eff,
             "energy_per_kl": service * view.diag("energy_intensity_multiplier"),
         }

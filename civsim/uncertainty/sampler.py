@@ -184,27 +184,104 @@ def run_ensemble(
     )
 
 
-def loglik_paths(
+# --- per-series discrepancy scale (M2) --------------------------------------
+#
+# M1's likelihood gave every series the same 6% structural scale. That is not a
+# conservative default, it is an assertion -- that the model is equally wrong
+# about population and about the low-carbon share -- and it was false by a
+# factor of five. A series fitted at 27% MAPE then contributes residuals five
+# standard deviations wide, dominates the joint likelihood, and drags shared
+# parameters away from where the series it *can* fit would put them. M1 lost
+# M0's one robust win that way.
+#
+# Assigning a scale per series by hand would fix the symptom by fitting the
+# likelihood, which is worse. The right move is to treat each series' scale as
+# unknown and integrate it out. With an inverse-gamma prior on sigma^2 the
+# integral is analytic and the Gaussian becomes a multivariate Student-t:
+#
+#   log p(r) = -n/2 log(2pi) - 1/2 log|S| + a log b - lgamma(a)
+#              + lgamma(a + n/2) - (a + n/2) log(b + Q/2)
+#
+# with Q = r' S^-1 r and S the correlation shape. The decisive difference is
+# that the residual enters through log(b + Q/2) rather than through Q: a badly
+# fitted series is charged a logarithmic penalty instead of a quadratic one, so
+# it reports "I am a poorly modelled channel" instead of overwhelming the rest.
+#
+# This adds no sampled parameters. It also yields a *diagnostic* worth more than
+# the fix -- the posterior scale per series is a direct estimate of how wrong
+# the model is in each channel, which is exactly what a structural-error budget
+# needs and what nothing in M0 or M1 could report.
+
+#: Inverse-gamma prior on the per-series discrepancy variance.
+#: a=2 gives 4 degrees of freedom -- heavy tailed on purpose, since the whole
+#: point is to tolerate a channel being far more wrong than expected.
+#: b is set so E[sigma^2] = b/(a-1) matches STRUCTURAL_SCALE^2.
+DISCREPANCY_IG_A = 2.0
+DISCREPANCY_IG_B = (DISCREPANCY_IG_A - 1.0) * STRUCTURAL_SCALE**2
+
+
+def _shape_matrix(
+    years: np.ndarray,
+    obs_sds: np.ndarray,
+    structural_ref: float,
+    corr_years: float,
+) -> np.ndarray:
+    """Correlation shape with grade-driven extra variance on the diagonal.
+
+    The overall scale is integrated out, so what remains here is *relative*
+    structure: the correlation kernel, plus per-point slack proportional to how
+    observational that point is. Grade therefore still distinguishes points
+    within a series -- pre-1959 ice-core CO2 gets more slack than Mauna Loa --
+    while the series-wide scale is inferred rather than asserted.
+    """
+    dt = np.abs(years[:, None] - years[None, :])
+    shape = np.exp(-dt / corr_years)
+    shape[np.diag_indices_from(shape)] += (obs_sds / structural_ref) ** 2 + 1e-10
+    return shape
+
+
+@dataclass(frozen=True)
+class SeriesLik:
+    """Per-series likelihood pieces, kept so the scale can be reported."""
+
+    name: str
+    quad: np.ndarray  # r' S^-1 r per member
+    n: int
+    logdet: float
+
+    def loglik(self, a: float, b: float) -> np.ndarray:
+        return (
+            -0.5 * self.n * math.log(2.0 * math.pi)
+            - 0.5 * self.logdet
+            + a * math.log(b)
+            - math.lgamma(a)
+            + math.lgamma(a + 0.5 * self.n)
+            - (a + 0.5 * self.n) * np.log(b + 0.5 * self.quad)
+        )
+
+    def posterior_scale(self, a: float, b: float) -> np.ndarray:
+        """Posterior mean of sigma given the residuals -- the inferred scale."""
+        denom = a + 0.5 * self.n - 1.0
+        return np.sqrt((b + 0.5 * self.quad) / denom)
+
+
+def series_likelihoods(
     paths: Mapping[str, np.ndarray],
     times: np.ndarray,
     calibration_obs: Mapping[str, Any],
     snapshot: Snapshot,
     structural: float = STRUCTURAL_SCALE,
     corr_years: float = DISCREPANCY_CORR_YEARS,
-) -> np.ndarray:
-    """Log-likelihood of each member against calibration-window data only.
+) -> list[SeriesLik]:
+    """Quadratic forms per series, against calibration-window data only.
 
-    `calibration_obs` must come from :meth:`Holdout.calibration`. Nothing in
-    this function has access to the test window, and that is the single audit
-    point the whole hold-out discipline rests on.
-
-    Residuals are taken in log space and scored under a correlated discrepancy
-    covariance -- see :data:`DISCREPANCY_CORR_YEARS` for why an iid likelihood
-    is not merely conservative here but quantitatively wrong.
+    `calibration_obs` must come from :meth:`Holdout.calibration`. Nothing here
+    can see the test window, and that is the single audit point the whole
+    hold-out discipline rests on.
     """
     idx = {float(t): i for i, t in enumerate(times)}
     n_members = next(iter(paths.values())).shape[0]
-    total = np.zeros(n_members)
+    out: list[SeriesLik] = []
 
     for name, obs in calibration_obs.items():
         meta = snapshot.series(name).meta
@@ -213,25 +290,59 @@ def loglik_paths(
         with np.errstate(divide="ignore", invalid="ignore"):
             resid = np.log(model) - np.log(obs.values)[None, :]
 
-        sds = np.array(
-            [
-                likelihood_scale(meta.grade_at(float(y)), structural)
-                for y in obs.years
-            ]
+        obs_sds = np.array(
+            [GRADE_OBS_SCALE[meta.grade_at(float(y))] for y in obs.years]
         )
-        sigma = discrepancy_covariance(obs.years, sds, corr_years)
-        chol = np.linalg.cholesky(sigma)
+        shape = _shape_matrix(obs.years, obs_sds, structural, corr_years)
+        chol = np.linalg.cholesky(shape)
         logdet = 2.0 * float(np.sum(np.log(np.diag(chol))))
 
         finite = np.all(np.isfinite(resid), axis=1)
         quad = np.full(n_members, np.inf)
         if finite.any():
-            z = np.linalg.solve(chol, resid[finite].T)  # (n_years, n_ok)
+            z = np.linalg.solve(chol, resid[finite].T)
             quad[finite] = np.sum(z**2, axis=0)
-        total += -0.5 * quad - 0.5 * logdet
+        out.append(SeriesLik(name, quad, len(obs.years), logdet))
 
+    return out
+
+
+def loglik_paths(
+    paths: Mapping[str, np.ndarray],
+    times: np.ndarray,
+    calibration_obs: Mapping[str, Any],
+    snapshot: Snapshot,
+    structural: float = STRUCTURAL_SCALE,
+    corr_years: float = DISCREPANCY_CORR_YEARS,
+) -> np.ndarray:
+    liks = series_likelihoods(
+        paths, times, calibration_obs, snapshot, structural, corr_years
+    )
+    total = np.zeros(next(iter(paths.values())).shape[0])
+    for lk in liks:
+        total += lk.loglik(DISCREPANCY_IG_A, DISCREPANCY_IG_B)
     total[~np.isfinite(total)] = -np.inf
     return total
+
+
+def inferred_discrepancy(
+    paths: Mapping[str, np.ndarray],
+    times: np.ndarray,
+    calibration_obs: Mapping[str, Any],
+    snapshot: Snapshot,
+    structural: float = STRUCTURAL_SCALE,
+    corr_years: float = DISCREPANCY_CORR_YEARS,
+) -> dict[str, float]:
+    """Inferred structural error per series -- how wrong the model is, by channel."""
+    liks = series_likelihoods(
+        paths, times, calibration_obs, snapshot, structural, corr_years
+    )
+    out: dict[str, float] = {}
+    for lk in liks:
+        s = lk.posterior_scale(DISCREPANCY_IG_A, DISCREPANCY_IG_B)
+        s = s[np.isfinite(s)]
+        out[lk.name] = float(np.median(s)) if s.size else float("nan")
+    return out
 
 
 def log_weights(

@@ -252,3 +252,135 @@ decision to produce noise.
 3. **Rolling-origin scoring.** Six scored points cannot resolve skill; multiple
    cutoffs would both raise the point count and test the non-stationarity claim
    directly.
+
+---
+
+## M2 — 2026-07-26
+
+All three M1 follow-ups, in the order they had to be done: the discrepancy fix
+first, because it is what makes adding an uncertain data series safe rather than
+repeating M1's contamination.
+
+### 1. Per-series discrepancy variance — estimated, not assigned
+
+M1 asserted that the model is equally wrong about every channel. Measured, that
+assertion was off by more than an order of magnitude:
+
+| series | inferred discrepancy | M1 assumed |
+|---|---|---|
+| low-carbon share | 11–46% | 6% |
+| CO₂ emissions | 6.3–9.6% | 6% |
+| primary energy | 6.2–9.1% | 6% |
+| GDP | 3.7–5.5% | 6% |
+| population, CO₂ ppm, age shares | 2.3–4.3% | 6% |
+
+Assigning a scale per series by hand would have fixed the symptom by fitting the
+likelihood. Instead the scale is given an inverse-gamma prior and integrated out
+analytically, turning each series' Gaussian into a multivariate Student-t. The
+decisive change is that residuals enter through `log(b + Q/2)` rather than `Q`:
+a badly modelled channel is charged a logarithmic penalty and reports itself as
+badly modelled, instead of a quadratic one that overwhelms every other channel.
+No sampled parameters are added.
+
+**Result on M0's five series, four seeds, 1990 origin — only the likelihood
+changed:**
+
+| series | M0 | M1 | M2 |
+|---|---|---|---|
+| population | +49.4% | +12.6% | **+65.0%** robust |
+| GDP | −38.5% | −38.7% | −63.0% |
+| primary energy | −43.2% | −106.7% | −199.3% |
+| CO₂ emissions | −54.6% | −34.1% | −88.9% |
+| CO₂ ppm | −451.8% | −81.2% | −83.5% |
+
+**Population's robust skill is restored and now exceeds M0's.** That was the
+stated purpose and it worked.
+
+The other channels got worse, and the reason matters more than the numbers. The
+marginal-t likelihood no longer forces the calibration to chase a channel the
+model cannot structurally fit, so it stops distorting shared parameters toward
+energy — and energy's forecast falls to what the model is actually worth there.
+**M1's −107% on energy was flattered**, bought by degrading population's fit.
+M2 is not worse at energy; M2 stopped hiding how bad energy was.
+
+### 2. Data that identifies the two energy channels
+
+M1's energy regression was an identification failure: the service ladder and the
+efficiency knowledge stock both multiply into primary energy, and aggregate
+primary energy cannot separate them.
+
+The observable that does separate them is conversion efficiency, which responds
+to efficiency knowledge and not to the ladder. Added
+`useful_exergy_efficiency_pct` — global primary-to-useful exergy efficiency from
+the exergy-accounting literature — as a scored series.
+
+It is **C-grade, deliberately**. Published estimates disagree on the level by
+several percentage points while agreeing much better on the trend, so it
+constrains the slope of conversion efficiency far more than its height. Adding a
+series this uncertain is precisely what M1's uniform likelihood could not have
+survived; its inferred discrepancy comes out at 3.0–4.9%, so it neither
+dominates nor is ignored. Item 1 is what made item 2 safe, which is why it came
+first.
+
+Identification is improved, not solved. Full separation needs cross-section —
+countries at different development levels sharing one technology frontier — and
+that is M3, not more world-level time series.
+
+### 3. Rolling origins, and a control for what they actually show
+
+Four origins (1975, 1985, 1995, 2005), each running the full protocol
+independently: own prior, own SMC, own freeze, own reveal. Scored points rise
+from 6 to 28 per series.
+
+The expanding-window result showed skill degrading as the origin moves later —
+the §2.2 signature. But it is confounded: later origins have shorter test
+windows, so the trend could be three noisy points rather than non-stationarity.
+
+**Control run** (`civsim rolling --control`): every origin scored on the *same*
+1995–2020 window, only the calibration end moving. This is asymmetric in the
+useful direction — later origins have strictly **more** calibration data, so if
+skill still degrades the "less data" explanation is gone too.
+
+It still degrades: 6 of 9 series, mean −144 skill points per decade.
+
+| series | pooled skill (18 pts) | 1975 | 1985 | 1995 | verdict |
+|---|---|---|---|---|---|
+| population | **+63.5%** | +74% | +43% | +74% | **robust skill** |
+| useful exergy efficiency | +19.3% | +78% | −71% | −47% | sign unstable |
+| working-age share | +8.5% | +82% | −135% | −499% | sign unstable |
+| GDP | −20.6% | −35% | +57% | −41% | sign unstable |
+| CO₂ ppm | −23.8% | +17% | −150% | −40% | sign unstable |
+| CO₂ emissions | −38.9% | −84% | +70% | +10% | sign unstable |
+| old-age share | −86.5% | −216% | −25% | +50% | sign unstable |
+| primary energy | −138.1% | −120% | −81% | −1087% | robust loss |
+| low-carbon share | −425.1% | −66% | −616% | −1281% | robust loss |
+
+**Adding more recent calibration data makes forecasts worse.** That is the first
+quantitative confirmation of design §2.2 in this project rather than an appeal
+to it.
+
+One honest alternative reading, which should travel with the finding: more
+calibration data also tightens the posterior, and CRPS punishes a confident
+wrong forecast harder than a vague one. So the mechanism may be less "the world
+changed regime" and more "a structurally wrong model given more data becomes
+more confident without becoming more accurate." Those are not the same claim.
+The second is arguably the sharper and more useful one, and this experiment
+cannot separate them.
+
+### Standing scorecard
+
+Robust skill on **1 of 9** series (population), across four origins and four
+seeds. Everything else is a robust loss or sign-unstable. The `stability` and
+`rolling` commands exist so that this cannot be reported any other way.
+
+### For M3
+
+1. **Cross-section.** The energy channels cannot be identified from world
+   aggregates at all, and the low-carbon share's 11–46% discrepancy says the
+   technology module is the worst-modelled part of the system. Both need
+   countries at different development levels, which is the design's M3 anyway.
+2. **The low-carbon share is the weakest channel by a wide margin** and should
+   be attacked before anything else in the technology layer is elaborated.
+3. **Correlated errors *between* series.** The likelihood still treats series as
+   independent given their scales. They are not — if energy runs high, emissions
+   run high — and that correlation is currently double-counting evidence.

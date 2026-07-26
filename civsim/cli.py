@@ -2,8 +2,9 @@
 
     python -m civsim selftest    conservation and protocol checks, no fitting
     python -m civsim prior       print the prior
-    python -m civsim backtest    the M1 run: fit 1950-1990, score 1990-2020
+    python -m civsim backtest    the M2 run: fit 1950-1990, score 1990-2020
     python -m civsim stability   re-run across seeds; only robust verdicts
+    python -m civsim rolling     rolling-origin evaluation across four cutoffs
 """
 
 from __future__ import annotations
@@ -68,16 +69,16 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     print(report.verdicts())
 
     OUT.mkdir(exist_ok=True)
-    fig = fan_figure(report, OUT / "m1_backtest_fan.png")
-    report.write_manifest(OUT / "m1_backtest_manifest.json")
-    report.holdout.write_manifest(OUT / "m1_protocol.json")
+    fig = fan_figure(report, OUT / "m2_backtest_fan.png")
+    report.write_manifest(OUT / "m2_backtest_manifest.json")
+    report.holdout.write_manifest(OUT / "m2_protocol.json")
     print(f"\nwrote {fig}")
-    print(f"wrote {OUT / 'm1_backtest_manifest.json'}")
-    print(f"wrote {OUT / 'm1_protocol.json'}")
+    print(f"wrote {OUT / 'm2_backtest_manifest.json'}")
+    print(f"wrote {OUT / 'm2_protocol.json'}")
 
     n = len(report.scores)
     print(
-        f"\nM1 exit criterion: model beat every baseline on "
+        f"\nM2 exit criterion: model beat every baseline on "
         f"{report.n_beaten}/{n} series."
     )
     return 0
@@ -129,6 +130,44 @@ def cmd_stability(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rolling(args: argparse.Namespace) -> int:
+    from .backtest.rolling import DEFAULT_ORIGINS, run_rolling
+
+    from .backtest.rolling import CONTROL_ORIGINS
+
+    if args.control:
+        res = run_rolling(
+            origins=CONTROL_ORIGINS,
+            fixed_test_start=args.fixed_test,
+            n_draws=args.draws,
+            n_resample=args.resample,
+            seed=args.seed,
+            verbose=True,
+        )
+    else:
+        res = run_rolling(
+            origins=DEFAULT_ORIGINS,
+            n_draws=args.draws,
+            n_resample=args.resample,
+            seed=args.seed,
+            verbose=True,
+        )
+    print("\n" + res.table())
+    print("\n" + res.discrepancy_table())
+    print("\n" + res.non_stationarity_summary())
+
+    OUT.mkdir(exist_ok=True)
+    res.write_manifest(OUT / "m2_rolling_manifest.json")
+    print(f"\nwrote {OUT / 'm2_rolling_manifest.json'}")
+
+    robust = sum(1 for n in res.series if res.verdict(n) == "ROBUST SKILL")
+    print(
+        f"\nRobust skill across all {len(res.origins)} origins on "
+        f"{robust}/{len(res.series)} series."
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="civsim")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -150,6 +189,16 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--seed", type=int, default=1)
     st.add_argument("--repeats", type=int, default=5)
     st.set_defaults(fn=cmd_stability)
+
+    ro = sub.add_parser("rolling")
+    ro.add_argument("--draws", type=int, default=900)
+    ro.add_argument("--resample", type=int, default=1200)
+    ro.add_argument("--seed", type=int, default=20260726)
+    ro.add_argument("--control", action="store_true",
+                    help="fixed test window; isolates non-stationarity from "
+                         "test-window length")
+    ro.add_argument("--fixed-test", type=float, default=1995.0)
+    ro.set_defaults(fn=cmd_rolling)
 
     args = ap.parse_args(argv)
     return args.fn(args)

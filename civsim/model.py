@@ -39,6 +39,7 @@ OBSERVED_SERIES = (
     "old_age_share_pct",
     "gdp_bn2011ppp",
     "primary_energy_ej",
+    "useful_exergy_efficiency_pct",
     "lowcarbon_share_pct",
     "co2_emissions_gtco2",
     "co2_ppm",

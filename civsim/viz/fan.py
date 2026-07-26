@@ -35,6 +35,7 @@ CREDIBLE_HORIZON: dict[str, float] = {
     "working_age_share_pct": 2070.0,
     "old_age_share_pct": 2070.0,
     "lowcarbon_share_pct": 2045.0,
+    "useful_exergy_efficiency_pct": 2050.0,
     "gdp_bn2011ppp": 2035.0,
     "primary_energy_ej": 2050.0,
     "co2_emissions_gtco2": 2050.0,
@@ -50,6 +51,7 @@ PRETTY: dict[str, str] = {
     "working_age_share_pct": "Working-age share, 15-64 (%)",
     "old_age_share_pct": "Old-age share, 65+ (%)",
     "lowcarbon_share_pct": "Low-carbon share of primary energy (%)",
+    "useful_exergy_efficiency_pct": "Useful exergy efficiency (% of primary)",
 }
 
 BANDS = [(0.05, 0.95, 0.16), (0.10, 0.90, 0.22), (0.25, 0.75, 0.30)]
@@ -164,7 +166,7 @@ def fan_figure(report: BacktestReport, path: Path, title: str | None = None):
         frameon=False, bbox_to_anchor=(0.5, -0.005),
     )
     fig.suptitle(
-        title or "civsim M1 -- world aggregate backtest, posterior predictive",
+        title or "civsim M2 -- world aggregate backtest, posterior predictive",
         fontsize=12, x=0.008, ha="left",
     )
     fig.tight_layout(rect=(0, 0.035, 1, 0.975))

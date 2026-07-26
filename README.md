@@ -10,8 +10,8 @@ for the feasibility assessment and full design, and
 structure and priors, recorded with whether it was made before or after the
 test window was revealed.
 
-Status: **M1** — single-region world model with an explicit technology layer,
-1950–2020 backtest.
+Status: **M2** — single-region world model with an explicit technology layer,
+inferred per-channel structural error, and rolling-origin evaluation.
 
 ---
 
@@ -23,94 +23,110 @@ pip install -e ".[dev]"
 python -m civsim selftest     # conservation + protocol checks, no fitting
 python -m civsim backtest     # fit 1950-1990, score 1990-2020, write fan chart
 python -m civsim stability    # re-run across seeds; report only robust verdicts
-pytest                        # 44 tests
+python -m civsim rolling      # four origins; pooled skill + non-stationarity test
+python -m civsim rolling --control   # fixed test window; isolates the confound
+pytest                        # 49 tests
 ```
 
-`backtest` writes `out/m1_backtest_fan.png`, plus a run manifest and a protocol
+`backtest` writes `out/m2_backtest_fan.png`, plus a run manifest and a protocol
 manifest recording the snapshot hash, the freeze, and the reveal.
 
 ---
 
-## What M1 actually found
+## What M2 actually found
 
-Calibrate 1950–1990, freeze, then score 1990–2020 against five naive baselines
-(random walk, drifting random walk, log-linear trend, AR(1) on growth, recent
-trend). CRPS, model and baselines scored like-for-like — every baseline carries
-its own fitted uncertainty, so the comparison is not rigged toward the
-probabilistic model. Verdicts are those whose sign survives four seeds; a
-single-run skill number is not reported as a result.
+Robust skill on **1 of 9** series (population), across four rolling origins and
+four seeds. Everything else is a robust loss or sign-unstable. The `stability`
+and `rolling` commands exist so this cannot be reported any other way.
 
-**M1 has robust skill on zero series. M0 had one.** Measured on M0's own five
-series so the comparison is like-for-like:
+### The model knows how wrong it is, per channel
 
-| series | M0 mean | M1 mean [min, max] | verdict |
+M1 asserted the model was equally wrong about everything (a uniform 6%
+structural scale). Measured, that was off by more than an order of magnitude:
+
+| series | inferred discrepancy | M1 assumed |
+|---|---|---|
+| low-carbon share | 11–46% | 6% |
+| CO₂ emissions | 6.3–9.6% | 6% |
+| primary energy | 6.2–9.1% | 6% |
+| GDP | 3.7–5.5% | 6% |
+| population, CO₂ ppm, age shares | 2.3–4.3% | 6% |
+
+The scale is not assigned per series — that would be fitting the likelihood. It
+is given an inverse-gamma prior and integrated out analytically, so each series'
+Gaussian becomes a multivariate Student-t. Residuals then enter through
+`log(b + Q/2)` instead of `Q`: a badly modelled channel is charged a logarithmic
+penalty and reports itself as badly modelled, rather than a quadratic one that
+overwhelms every other channel. No sampled parameters added.
+
+**Effect, same five series and seeds, only the likelihood changed:**
+
+| series | M0 | M1 | M2 |
 |---|---|---|---|
-| population | **+49.4%** | +12.6% [−57, +63] | robust skill lost, now unstable |
-| GDP | −38.5% | −38.7% [−79, −15] | robust loss, unchanged |
-| primary energy | −43.2% | **−106.7%** [−182, −19] | robust loss, materially worse |
-| CO₂ emissions | −54.6% | −34.1% [−74, +15] | improved, sign unstable |
-| CO₂ concentration | −451.8% | **−81.2%** [−191, +36] | hugely improved, still a net loss |
+| population | +49.4% | +12.6% | **+65.0%** robust |
+| GDP | −38.5% | −38.7% | −63.0% |
+| primary energy | −43.2% | −106.7% | −199.3% |
+| CO₂ emissions | −54.6% | −34.1% | −88.9% |
+| CO₂ ppm | −451.8% | −81.2% | −83.5% |
 
-Two things went right and two went wrong, and they are separable.
+Population's robust skill is restored and exceeds M0's. The other channels look
+worse, and the reason matters more than the numbers: the likelihood no longer
+forces the calibration to chase a channel the model cannot structurally fit, so
+it stops distorting shared parameters toward energy. **M1's −107% on energy was
+flattered**, bought by degrading population's fit. M2 is not worse at energy;
+M2 stopped hiding how bad energy was.
 
-**The land-use fix worked, exactly as M0's residuals predicted.** Concentration
-was M0's worst failure by a factor of eight; adding the missing source term
-moved it from −452% to −81%. The diagnosis that too-high emissions with
-too-low concentration means a *missing source* rather than a wrong parameter
-was correct and led straight to the fix. Caveat that must travel with it: the
-frozen run tracks concentration to 0.5% MAPE while running fossil emissions 23%
-high, so the calibration is offsetting a too-steep emissions path with a high
-uptake coefficient. The carbon module is less wrong, not right.
+### Non-stationarity, measured rather than asserted
 
-**The technology module made energy substantially worse** (−43% → −107%, robust
-across every seed). Energy demand now has two opposing mechanisms — a service
-ladder rising with development, efficiency knowledge pushing the other way —
-where M0 had one exponential, and aggregate primary energy cannot separate them.
-Any pair that fits 1950–1990 is admitted, and they diverge afterwards. Adding a
-mechanism that is not separately observable made the forecast worse. The fix is
-not a better prior but data that identifies the channels, which means sectoral
-intensity series and belongs to M2.
+Four origins (1975, 1985, 1995, 2005), each running the full protocol
+independently — own prior, own SMC, own freeze, own reveal. Scored points rise
+from 6 to 28 per series.
 
-**The age-structured population lost M0's one robust win** (+49% → +13%). Three
-Erlang-staged compartments are more realistic than one aggregate stock and
-forecast worse.
+Skill degrades as the origin moves later. That alone is confounded: later
+origins have shorter test windows, so the trend could just be three noisy points.
+`--control` scores every origin on the *same* 1995–2020 window, moving only the
+calibration end — asymmetric in the useful direction, since later origins then
+have strictly **more** data.
 
-### By this project's own merge rule, the technology module fails
+It still degrades: 6 of 9 series, mean −144 skill points per decade. **Adding
+more recent calibration data makes forecasts worse.** First quantitative
+confirmation of design §2.2 in this project rather than an appeal to it.
 
-Design §15.1 says every new subsystem must demonstrate it improved the hold-out
-score before being merged. On backtest evidence, neither the technology module
-nor the age structure does.
+One alternative reading must travel with that finding: more data also tightens
+the posterior, and CRPS punishes confident-and-wrong harder than vague. So the
+mechanism may be less "the world changed regime" than "a structurally wrong
+model given more data becomes more confident without becoming more accurate."
+This experiment cannot separate the two, and the second is arguably the sharper
+claim.
 
-**Both are retained anyway, and the reason is on the record rather than
-assumed.** M0's diagnosis was that an emissions plateau lay outside its reachable
-set *at every parameter value*. That is a statement about which futures the model
-can represent, and backtest skill over 1950–2020 cannot measure it — a model can
-track history well while being structurally incapable of the transition every
-forward scenario turns on. The technology layer changes the reachable set, which
-is what a scenario generator needs and what §15.1 was not written to weigh.
+| series | pooled (18 pts) | 1975 | 1985 | 1995 | verdict |
+|---|---|---|---|---|---|
+| population | **+63.5%** | +74% | +43% | +74% | **robust skill** |
+| useful exergy efficiency | +19.3% | +78% | −71% | −47% | unstable |
+| working-age share | +8.5% | +82% | −135% | −499% | unstable |
+| GDP | −20.6% | −35% | +57% | −41% | unstable |
+| CO₂ ppm | −23.8% | +17% | −150% | −40% | unstable |
+| CO₂ emissions | −38.9% | −84% | +70% | +10% | unstable |
+| old-age share | −86.5% | −216% | −25% | +50% | unstable |
+| primary energy | −138.1% | −120% | −81% | −1087% | robust loss |
+| low-carbon share | −425.1% | −66% | −616% | −1281% | robust loss |
 
-The consequence: **the technology module is currently unfalsified, not
-validated.** It has earned a claim to be necessary, not a claim to be right.
-Those must not be conflated.
+### The technology module is still the worst-modelled part
 
-### Conservation is necessary and not sufficient
+The low-carbon share carries 11–46% structural error and is a robust loss at
+every origin. M1 retained the technology layer on the argument that it changes
+the reachable set of futures even though it does not improve backtest skill.
+That argument still holds and the evidence against the layer is now sharper: it
+remains **unfalsified, not validated**, and it is the first thing M3 should
+attack.
 
-Two M1 defects passed every conservation check:
+### Why the ordering mattered
 
-- **Diffusion deadlock.** Learning needs deployment, deployment needs cost
-  parity, cost parity needs learning. The low-carbon share fell from 2.5% to
-  0.03% over seventy years while retirement ate capacity that was never
-  replaced — a technology module that could not represent any transition. Fixed
-  with a niche deployment floor (hydro, plus the policy demand that historically
-  bought nuclear and solar learning above market price). `lowcarbon_share_pct` is
-  now a scored series so the layer is falsifiable on its own terms.
-- **Negative conversion efficiency.** When knowledge fell below its t0 index the
-  exponent flipped sign, useful work went negative, and the CES bracket returned
-  a *complex number* that propagated silently until something compared it to
-  zero. Nothing was created or destroyed, so the ledger saw nothing.
-
-Quantities with physical ranges need their ranges asserted separately from their
-balances. Both now have regression tests.
+The exergy series added in M2 is C-grade — published estimates disagree on the
+level by several points while agreeing on the trend. Adding a series that
+uncertain under M1's uniform likelihood would have repeated M1's contamination
+exactly. Under the inferred scale it comes out at 3.0–4.9% and neither dominates
+nor is ignored. Item 1 is what made item 2 safe.
 
 ---
 
