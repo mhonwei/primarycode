@@ -268,3 +268,113 @@ def test_control_mode_holds_the_test_window_fixed():
 
     assert len(CONTROL_ORIGINS) >= 3
     assert list(CONTROL_ORIGINS) == sorted(CONTROL_ORIGINS)
+
+
+# ------------------------------- cross-series error covariance (M3)
+
+
+def test_aligned_errors_are_not_counted_twice():
+    """The point of the matrix-t.
+
+    Two series whose residuals point the same way carry less joint evidence
+    than two independent ones. Under the M2 per-series likelihood they carry
+    exactly as much, which is how a model that computes emissions *from* energy
+    gets to score both as separate confirmation.
+    """
+    from civsim.uncertainty.sampler import _iw_prior, _log_multigamma
+
+    nu, psi = _iw_prior(2, 0.06)
+    n = 6
+    r = np.ones(n)
+
+    def loglik(R):
+        C = np.eye(n)
+        G = R @ R.T
+        return (
+            -0.5 * n * 2 * np.log(np.pi)
+            + _log_multigamma(0.5 * (nu + n), 2)
+            - _log_multigamma(0.5 * nu, 2)
+            + 0.5 * nu * np.linalg.slogdet(psi)[1]
+            - 0.5 * (nu + n) * np.linalg.slogdet(psi + G)[1]
+        )
+
+    aligned = np.vstack([r, r]) * 0.1
+    orthogonal = np.vstack([r, np.array([1, -1, 1, -1, 1, -1.0])]) * 0.1
+    assert loglik(aligned) > loglik(orthogonal), (
+        "aligned residuals were penalised as heavily as independent ones; "
+        "the cross-series covariance is not doing its job"
+    )
+
+
+def test_cross_series_correlation_is_reported(snap):
+    from civsim.model import OBSERVED_SERIES, build_engine
+    from civsim.uncertainty.priors import sample_prior
+    from civsim.uncertainty.sampler import inferred_error_covariance
+
+    h = Holdout(snap, (1950.0, 1990.0), (1990.0, 2020.0), tuple(OBSERVED_SERIES))
+    for p in sample_prior(np.random.default_rng(5), 30):
+        try:
+            traj = build_engine(p, snap, t0=1950.0).run(1950.0, 1990.0)
+        except Exception:  # noqa: BLE001
+            continue
+        break
+    paths = {s: traj.series(s)[None, :] for s in OBSERVED_SERIES}
+    names, sigma, corr = inferred_error_covariance(
+        paths, traj.times, h.calibration(), snap
+    )
+    assert len(names) == len(OBSERVED_SERIES)
+    np.testing.assert_allclose(np.diag(corr), 1.0, atol=1e-9)
+    np.testing.assert_allclose(corr, corr.T, atol=1e-9)
+    assert np.all(np.abs(corr) <= 1.0 + 1e-9)
+
+
+# --------------------------------------------- regional model (M3)
+
+
+def test_regions_sum_to_the_world(snap):
+    """Regional levels are world totals times an observed share, so the sum is
+    an identity rather than something that could drift."""
+    from civsim.model import build_engine
+    from civsim.uncertainty.priors import sample_prior
+
+    p = sample_prior(np.random.default_rng(2), 1)[0]
+    traj = build_engine(p, snap, t0=1950.0).run(1950.0, 1970.0)
+    world = traj.diagnostics["population_mn"]
+    parts = (
+        traj.diagnostics["hi_population_mn"]
+        + traj.diagnostics["lo_population_mn"]
+    )
+    np.testing.assert_allclose(world, parts, rtol=1e-12)
+
+
+def test_regions_sit_at_different_development_levels(snap):
+    """The cross-section only identifies anything if the regions actually
+    differ -- otherwise two copies of one region have been built."""
+    from civsim.model import build_engine
+    from civsim.uncertainty.priors import sample_prior
+
+    p = sample_prior(np.random.default_rng(2), 1)[0]
+    traj = build_engine(p, snap, t0=1950.0).run(1950.0, 1990.0)
+    hi = traj.diagnostics["hi_capital_per_head"]
+    lo = traj.diagnostics["lo_capital_per_head"]
+    assert np.all(hi > lo), (
+        "the lagging region overtook the leader. Without absorptive capacity a "
+        "shared frontier plus Solow accumulation drives full convergence and "
+        "then overshoot -- see modules/technology.py."
+    )
+    assert np.all(hi > 1.5 * lo), (
+        "regions converged to near-parity; the cross-section carries too little "
+        "identifying contrast to be worth its parameters"
+    )
+
+
+def test_regional_modules_cannot_set_each_others_rates(snap):
+    """Two instances of one module class must not share a name, or the engine's
+    flow-ownership check silently lets either write the other's flows."""
+    from civsim.model import build_engine
+    from civsim.uncertainty.priors import sample_prior
+
+    p = sample_prior(np.random.default_rng(2), 1)[0]
+    eng = build_engine(p, snap, t0=1950.0)
+    names = [m.name for m in eng.modules]
+    assert len(names) == len(set(names)), f"duplicate module names: {names}"

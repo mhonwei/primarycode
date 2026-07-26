@@ -307,6 +307,100 @@ def series_likelihoods(
     return out
 
 
+# --- cross-series error correlation (M3) ------------------------------------
+#
+# M2 gave each series its own discrepancy scale but still treated series as
+# conditionally independent. They are not, and not marginally: emissions are
+# computed *from* energy in this model, so a particle that runs energy 20% high
+# runs emissions high by construction. Scoring both as independent evidence
+# counts the same error twice, and with nine series most of which sit on one
+# causal chain -- capital drives energy drives emissions drives concentration --
+# the joint likelihood is far sharper than the information warrants. That is the
+# same class of error as M1's uniform scale, one level up.
+#
+# The fix is the matrix generalisation of what M2 did. Stack residuals into a
+# p x n matrix (series by year), model it as matrix-normal with a separable
+# covariance Sigma (x) C, put an inverse-Wishart prior on the p x p cross-series
+# covariance Sigma, and integrate it out. The result is a matrix-t:
+#
+#   log p(R) = c - (nu + n)/2 * log|Psi + R C^-1 R'| + (nu/2) log|Psi|
+#              - (p/2) log|C| + logGamma_p((nu+n)/2) - logGamma_p(nu/2)
+#
+# The decisive term is a *determinant*, where M2 had a sum of per-series scalar
+# penalties. If two series' residuals point the same way, R C^-1 R' is nearly
+# singular in that direction and the determinant barely grows -- aligned errors
+# stop being counted as separate evidence. If they are orthogonal, it grows the
+# full amount and they count separately, which is correct.
+#
+# It also yields the diagnostic that was missing: the posterior cross-series
+# error correlation matrix, which says outright which channels are failing
+# together and therefore how much of the apparent evidence was ever independent.
+
+#: Inverse-Wishart prior on the cross-series discrepancy covariance.
+#: nu = p + 2 is the weakest proper prior with a finite mean; Psi is set so
+#: E[Sigma] = STRUCTURAL_SCALE^2 * I, i.e. the M1 assumption as a prior mean
+#: rather than as an assertion.
+def _iw_prior(p: int, structural: float) -> tuple[float, np.ndarray]:
+    nu = p + 2.0
+    psi = (nu - p - 1.0) * structural**2 * np.eye(p)
+    return nu, psi
+
+
+def _log_multigamma(a: float, p: int) -> float:
+    return 0.25 * p * (p - 1) * math.log(math.pi) + sum(
+        math.lgamma(a + 0.5 * (1 - j)) for j in range(1, p + 1)
+    )
+
+
+def residual_tensor(
+    paths: Mapping[str, np.ndarray],
+    times: np.ndarray,
+    calibration_obs: Mapping[str, Any],
+    snapshot: Snapshot,
+    structural: float = STRUCTURAL_SCALE,
+) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Grade-whitened residuals as (n_members, n_series, n_years).
+
+    Grade enters here rather than in the covariance. The Kronecker structure
+    needs one time-covariance shared by every series, but observation error
+    varies by series *and* year (pre-1959 ice-core CO2 against Mauna Loa).
+    Dividing each residual by its own known observation slack before the
+    separable model sees it keeps grade meaningful without breaking
+    separability -- it is pre-whitening of a known error, not an approximation
+    of the unknown one.
+    """
+    names = sorted(calibration_obs)
+    grids = {tuple(calibration_obs[n].years) for n in names}
+    if len(grids) != 1:
+        raise ValueError(
+            "cross-series covariance requires one shared year grid; got "
+            f"{len(grids)} distinct grids. Align the snapshot or fall back to "
+            "the per-series likelihood."
+        )
+    years = np.asarray(next(iter(grids)), dtype=float)
+    idx = {float(t): i for i, t in enumerate(times)}
+    cols = [idx[float(y)] for y in years]
+
+    n_members = next(iter(paths.values())).shape[0]
+    R = np.empty((n_members, len(names), len(years)))
+    for i, name in enumerate(names):
+        obs = calibration_obs[name]
+        meta = snapshot.series(name).meta
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r = np.log(paths[name][:, cols]) - np.log(obs.values)[None, :]
+        slack = np.array(
+            [
+                math.sqrt(
+                    1.0
+                    + (GRADE_OBS_SCALE[meta.grade_at(float(y))] / structural) ** 2
+                )
+                for y in years
+            ]
+        )
+        R[:, i, :] = r / slack[None, :]
+    return R, names, years
+
+
 def loglik_paths(
     paths: Mapping[str, np.ndarray],
     times: np.ndarray,
@@ -314,15 +408,98 @@ def loglik_paths(
     snapshot: Snapshot,
     structural: float = STRUCTURAL_SCALE,
     corr_years: float = DISCREPANCY_CORR_YEARS,
+    cross_series: bool = True,
 ) -> np.ndarray:
-    liks = series_likelihoods(
-        paths, times, calibration_obs, snapshot, structural, corr_years
+    """Joint log-likelihood against calibration-window data only.
+
+    With `cross_series` the errors are modelled as correlated across series and
+    that correlation is integrated out (matrix-t). Setting it False recovers the
+    M2 per-series marginal-t, which is kept so the two can be compared rather
+    than swapped in on faith.
+    """
+    if not cross_series:
+        liks = series_likelihoods(
+            paths, times, calibration_obs, snapshot, structural, corr_years
+        )
+        total = np.zeros(next(iter(paths.values())).shape[0])
+        for lk in liks:
+            total += lk.loglik(DISCREPANCY_IG_A, DISCREPANCY_IG_B)
+        total[~np.isfinite(total)] = -np.inf
+        return total
+
+    R, names, years = residual_tensor(
+        paths, times, calibration_obs, snapshot, structural
     )
-    total = np.zeros(next(iter(paths.values())).shape[0])
-    for lk in liks:
-        total += lk.loglik(DISCREPANCY_IG_A, DISCREPANCY_IG_B)
-    total[~np.isfinite(total)] = -np.inf
-    return total
+    n_members, p, n = R.shape
+    nu, psi = _iw_prior(p, structural)
+
+    dt = np.abs(years[:, None] - years[None, :])
+    C = np.exp(-dt / corr_years) + 1e-10 * np.eye(n)
+    C_chol = np.linalg.cholesky(C)
+    logdet_C = 2.0 * float(np.sum(np.log(np.diag(C_chol))))
+
+    const = (
+        -0.5 * n * p * math.log(math.pi)
+        + _log_multigamma(0.5 * (nu + n), p)
+        - _log_multigamma(0.5 * nu, p)
+        + 0.5 * nu * float(np.linalg.slogdet(psi)[1])
+        - 0.5 * p * logdet_C
+    )
+
+    finite = np.all(np.isfinite(R), axis=(1, 2))
+    out = np.full(n_members, -np.inf)
+    if finite.any():
+        Rf = R[finite]
+        # Z = R C^-1/2, so G = Z Z' = R C^-1 R'
+        Z = np.linalg.solve(C_chol, Rf.transpose(0, 2, 1)).transpose(0, 2, 1)
+        G = np.einsum("mik,mjk->mij", Z, Z)
+        sign, logdet = np.linalg.slogdet(psi[None, :, :] + G)
+        ok = sign > 0
+        vals = np.full(Rf.shape[0], -np.inf)
+        vals[ok] = const - 0.5 * (nu + n) * logdet[ok]
+        out[finite] = vals
+
+    out[~np.isfinite(out)] = -np.inf
+    return out
+
+
+def inferred_error_covariance(
+    paths: Mapping[str, np.ndarray],
+    times: np.ndarray,
+    calibration_obs: Mapping[str, Any],
+    snapshot: Snapshot,
+    structural: float = STRUCTURAL_SCALE,
+    corr_years: float = DISCREPANCY_CORR_YEARS,
+) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """Posterior mean cross-series error covariance, and its correlation form.
+
+    The correlation matrix is the point of the exercise: it says which channels
+    fail together, and therefore how much of the joint likelihood's apparent
+    evidence was ever independent.
+    """
+    R, names, years = residual_tensor(
+        paths, times, calibration_obs, snapshot, structural
+    )
+    n_members, p, n = R.shape
+    nu, psi = _iw_prior(p, structural)
+
+    dt = np.abs(years[:, None] - years[None, :])
+    C = np.exp(-dt / corr_years) + 1e-10 * np.eye(n)
+    C_chol = np.linalg.cholesky(C)
+
+    finite = np.all(np.isfinite(R), axis=(1, 2))
+    if not finite.any():
+        nan = np.full((p, p), np.nan)
+        return names, nan, nan
+    Rf = R[finite]
+    Z = np.linalg.solve(C_chol, Rf.transpose(0, 2, 1)).transpose(0, 2, 1)
+    G = np.einsum("mik,mjk->mij", Z, Z)
+    denom = nu + n - p - 1.0
+    sigma = np.median((psi[None, :, :] + G) / denom, axis=0)
+
+    sd = np.sqrt(np.clip(np.diag(sigma), 1e-300, None))
+    corr = sigma / np.outer(sd, sd)
+    return names, sigma, corr
 
 
 def inferred_discrepancy(

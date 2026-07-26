@@ -1,22 +1,34 @@
-"""Assembly of the M1 single-region world model.
+"""Assembly of the M3 two-region world model.
 
-Module order is the no-simultaneity contract made concrete:
+Regions
+-------
+Two: `hi_` (high income) and `lo_` (rest of world). The split exists to identify
+what one aggregate cannot -- see modules/aggregate.py for the argument.
 
-    population -> technology -> energy -> economy -> carbon
+**Almost every parameter stays global.** The energy service ladder and the
+demographic transition are single functions of development, shared by both
+regions; the regions differ only in where they sit on them, because their
+capital per head differs by roughly a factor of five. That is what makes the
+cross-section informative without enlarging the parameter budget (§11.6). Only
+the saving rate is regional, because investment behaviour genuinely differs and
+nothing else in the model can absorb that.
 
-  population  reads capital and its own compartments; publishes labour,
-              capital per head, age shares.
-  technology  reads only its own knowledge stocks; publishes the multipliers
-              every downstream module needs.
-  energy      reads capital, labour, capital per head, efficiency multiplier;
-              publishes primary energy and useful work.
-  economy     reads labour, useful work, TFP multiplier; publishes output.
-  carbon      reads primary energy and low-carbon capacity.
+Module order
+------------
+    pop_hi, pop_lo -> technology -> energy_hi, energy_lo
+                   -> econ_hi, econ_lo -> aggregate -> carbon
 
-Technology sits second despite depending on output, because the dependency runs
-through *rates*, not diagnostics: its multipliers come from stock levels known at
-the top of the step, while R&D spending is set in pass 2 once output exists.
-Nothing here is lagged a year to fake acyclicity. See modules/base.py.
+  pop_R        reads R capital; publishes R labour, capital per head, ages
+  technology   reads only its own (global) knowledge stocks
+  energy_R     reads R capital/labour/capital-per-head + global multipliers
+  econ_R       reads R labour, R useful work, global TFP
+  aggregate    sums regions; publishes world totals and regional shares
+  carbon       reads world primary energy and global low-carbon capacity
+
+Technology sits second despite depending on world output, because the dependency
+runs through *rates*, not diagnostics: its multipliers come from stock levels
+known at the top of the step, while R&D spending is set in pass 2 once output
+exists. Nothing is lagged a year to fake acyclicity.
 """
 
 from __future__ import annotations
@@ -26,11 +38,14 @@ from typing import Any, Mapping
 from .core.engine import Engine
 from .core.financial import Sector
 from .data.registry import Snapshot
+from .modules.aggregate import WorldAggregate
 from .modules.carbon import Carbon
 from .modules.economy import Economy
 from .modules.energy import Energy
 from .modules.population import Population
 from .modules.technology import Technology
+
+REGIONS = ("hi_", "lo_")
 
 #: Series the model produces that we hold against observation.
 OBSERVED_SERIES = (
@@ -43,7 +58,19 @@ OBSERVED_SERIES = (
     "lowcarbon_share_pct",
     "co2_emissions_gtco2",
     "co2_ppm",
+    # Cross-section. These are what the second region buys.
+    "hi_pop_share_pct",
+    "hi_gdp_share_pct",
+    "hi_energy_share_pct",
+    "hi_co2_share_pct",
 )
+
+#: World totals whose regional split is read from the snapshot.
+_SPLIT = {
+    "population_mn": "hi_pop_share_pct",
+    "gdp_bn2011ppp": "hi_gdp_share_pct",
+    "primary_energy_ej": "hi_energy_share_pct",
+}
 
 
 def initial_conditions(snapshot: Snapshot, t0: float) -> dict[str, float]:
@@ -64,45 +91,83 @@ def build_engine(
 ) -> Engine:
     ic = initial_conditions(snapshot, t0)
 
-    pop0 = ic["population_mn"] * 1e6
+    # Regional levels are reconstructed from world totals times the observed
+    # share, so the regions sum to the world by construction rather than by
+    # coincidence, and the world figure keeps its own (better) grade.
+    split: dict[tuple[str, str], float] = {}
+    for total, share_key in _SPLIT.items():
+        hi_frac = ic[share_key] / 100.0
+        split[("hi_", total)] = ic[total] * hi_frac
+        split[("lo_", total)] = ic[total] * (1.0 - hi_frac)
+
     working_share = ic["working_age_share_pct"] / 100.0
-    old_share = ic["old_age_share_pct"] / 100.0
-    y0 = ic["gdp_bn2011ppp"]
-    e0 = ic["primary_energy_ej"]
-    ppm0 = ic["co2_ppm"]
+    modules: list[Any] = []
 
-    k0 = y0 * params["capital_output_ratio"]
-    labour0 = pop0 * working_share * params["participation_rate"]
-    k_per_head0 = (k0 * 1e9) / pop0
-    u0 = e0 * params["conv_eff_initial"]
+    for r in REGIONS:
+        modules.append(
+            Population(
+                initial_total=split[(r, "population_mn")] * 1e6,
+                # Age structure is observed only at world level, so both regions
+                # start from it. They diverge immediately because development
+                # differs, which is the point of having two.
+                initial_working_share=working_share,
+                initial_old_share=ic["old_age_share_pct"] / 100.0,
+                region=r,
+            )
+        )
 
-    population = Population(
-        initial_total=pop0,
-        initial_working_share=working_share,
-        initial_old_share=old_share,
+    modules.append(
+        Technology(
+            t0=t0,
+            initial_lowcarbon_ej=(
+                ic["primary_energy_ej"] * params["initial_lowcarbon_share"]
+            ),
+            initial_modular_ej=(
+                ic["primary_energy_ej"] * params["initial_modular_share"]
+            ),
+            regions=REGIONS,
+        )
     )
-    technology = Technology(
-        t0=t0,
-        initial_lowcarbon_ej=e0 * params["initial_lowcarbon_share"],
-    )
-    energy = Energy(
-        t0=t0,
-        initial_capital=k0,
-        initial_labour=labour0,
-        initial_primary_energy=e0,
-        initial_capital_per_head=k_per_head0,
-    )
-    economy = Economy(
-        t0=t0,
-        initial_output=y0,
-        capital_output_ratio=params["capital_output_ratio"],
-        initial_labour=labour0,
-        initial_useful_work=u0,
-    )
-    carbon = Carbon(t0=t0, initial_ppm=ppm0)
+
+    def regional_start(r: str) -> tuple[float, float, float, float]:
+        pop0 = split[(r, "population_mn")] * 1e6
+        y0 = split[(r, "gdp_bn2011ppp")]
+        e0 = split[(r, "primary_energy_ej")]
+        labour0 = pop0 * working_share * params["participation_rate"]
+        return pop0, y0, e0, labour0
+
+    for r in REGIONS:
+        pop0, y0, e0, labour0 = regional_start(r)
+        k0 = y0 * params["capital_output_ratio"]
+        modules.append(
+            Energy(
+                t0=t0,
+                initial_capital=k0,
+                initial_labour=labour0,
+                initial_primary_energy=e0,
+                initial_capital_per_head=(k0 * 1e9) / pop0,
+                region=r,
+            )
+        )
+
+    for r in REGIONS:
+        _, y0, e0, labour0 = regional_start(r)
+        modules.append(
+            Economy(
+                t0=t0,
+                initial_output=y0,
+                capital_output_ratio=params["capital_output_ratio"],
+                initial_labour=labour0,
+                initial_useful_work=e0 * params["conv_eff_initial"],
+                region=r,
+            )
+        )
+
+    modules.append(WorldAggregate(regions=REGIONS))
+    modules.append(Carbon(t0=t0, initial_ppm=ic["co2_ppm"]))
 
     return Engine(
-        modules=[population, technology, energy, economy, carbon],
+        modules=modules,
         params=params,
         sectors=[
             Sector("households"),

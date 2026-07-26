@@ -384,3 +384,139 @@ seeds. Everything else is a robust loss or sign-unstable. The `stability` and
 3. **Correlated errors *between* series.** The likelihood still treats series as
    independent given their scales. They are not — if energy runs high, emissions
    run high — and that correlation is currently double-counting evidence.
+
+---
+
+## M3 — 2026-07-26
+
+All three M2 follow-ups, again in dependency order: the likelihood fix first,
+because regionalisation doubles the series count and the same-name series across
+regions are the most correlated pair in the system.
+
+### 1. Cross-series error correlation
+
+M2 gave each series its own discrepancy scale but kept them conditionally
+independent. They are not: emissions are computed *from* energy in this model, so
+a particle running energy 20% high runs emissions high by construction. Scoring
+both as independent evidence counts one error twice, and with nine series mostly
+strung along one causal chain the joint likelihood was far sharper than the
+information warranted.
+
+The fix is the matrix generalisation of M2's. Residuals stack into a p×n matrix
+(series by year), modelled matrix-normal with separable covariance Σ ⊗ C, with
+an inverse-Wishart prior on Σ integrated out analytically. The result is a
+matrix-t whose decisive term is `log|Ψ + R C⁻¹ R'|` — a **determinant** where M2
+had a sum of per-series scalars. Aligned residuals make that matrix nearly
+singular in their shared direction, so the determinant barely grows and the
+evidence is not double-counted. Orthogonal residuals grow it fully, which is
+correct. No sampled parameters added.
+
+Measured error correlations, which are the diagnostic that was missing:
+
+| pair | correlation |
+|---|---|
+| energy ↔ emissions | **+0.92** |
+| emissions ↔ GDP | +0.73 |
+| energy ↔ GDP | +0.66 |
+| low-carbon share ↔ exergy efficiency | −0.55 |
+
+Likelihood discrimination across particles fell from 105 to 89 nats — the
+correct direction, since the extra sharpness was an artefact.
+
+### 2. The low-carbon channel: two technology families
+
+Observed world low-carbon share rises, sits on a twenty-year **plateau**
+(11.3% in 1990 → 12.6% in 2010), then resumes. One technology family with one
+learning rate and one ceiling cannot produce that at any parameter value — the
+same structural impossibility as M0's inability to plateau emissions, and why
+this was the model's worst channel (11–46% inferred discrepancy).
+
+Split into dispatchable (hydro, nuclear: slow learning, hard resource-and-social
+ceiling) and modular (wind, solar: steep learning, a base small enough to be
+invisible for decades). The plateau then emerges as the gap between one
+saturating and the other arriving. Prior draws producing rise → pause → faster
+resumption went from 0% to 4%; the shape is now in the reachable set.
+
+Cost: five parameters, plus a softened adoption logistic. M2's sharpness of 6
+made the transition a threshold rather than a gradient — a technology at 1.9×
+parity got a 0.5% share, which the historical record contradicts.
+
+Inferred discrepancy on the channel improved from 11–46% to 21.5%. Still the
+worst channel by a factor of two.
+
+### 3. Cross-section: two regions
+
+Two regions, `hi_` (high income) and `lo_`. **Almost every parameter stays
+global** — the energy service ladder and the demographic transition are single
+functions of development that both regions sit on at different points, since
+their capital per head differs by roughly a factor of five. The cross-section
+therefore adds identifying information without enlarging the parameter budget.
+Only the saving rate is regional.
+
+Regional levels are world totals times an observed share, so the regions sum to
+the world by identity and the C-grade uncertainty is confined to the split.
+
+A deliberately falsifiable prediction: technology is global, so `hi_co2_share`
+must equal `hi_energy_share` exactly. Observation says 38% of energy but 33% of
+CO₂ in 2020. It is scored anyway and fails (−200% robust loss). The gap measures
+how much regional technology heterogeneity matters, which is worth more than
+omitting a prediction the model is committed to.
+
+### The structural failure this exposed, and the trade-off it forced
+
+The first two-region build had the **lagging region's capital per head overtake
+the leader's** by 2020 (ratio 4.41 → 0.88). A shared global frontier plus Solow
+accumulation drives full convergence and then overshoot. Poor regions overtaking
+rich ones is not a subtle calibration error, and it was visible inside the
+calibration window (ratio already 1.26 by 1990).
+
+Fixed with absorptive capacity (design §8, L3; Nelson-Phelps): a region captures
+the frontier only to the extent its own development lets it. Overshoot
+eliminated — 0 of 38 draws now cross over, median ratio 3.74.
+
+**And it made the backtest worse across the board:**
+
+| | without absorption | with absorption |
+|---|---|---|
+| robust skill | 2/13 | **1/13** |
+| hi_gdp_share | **+40.6%** robust skill | −73.7% robust loss |
+| population | +44.1% | +33.7% |
+
+The diagnosis is uncomfortable and worth stating plainly: the no-absorption
+version fitted the observed 1950–2020 convergence of the income split **by
+over-converging**, and paid for it with an absurd extrapolation just past the
+scored window. The parameters that reproduce historical catch-up imply overshoot
+afterwards. The model can do one or the other, not both.
+
+**The absorption version ships.** Same reasoning as M1's technology layer:
+backtest skill over 1950–2020 cannot see an overshoot that begins in 2020, and a
+model in which poor regions overtake rich ones is unusable for every forward
+question this project exists to ask. The score is the honest cost.
+
+A likely part of the residual: the high-income group has fixed membership in this
+data, while in reality countries graduated into it. Some of the observed share
+decline is compositional and no dynamic mechanism can or should reproduce it.
+That was flagged in the series metadata before the run, not after.
+
+### Standing scorecard
+
+Robust skill on **1 of 13** series (population, +33.7%). Everything else is a
+robust loss or sign-unstable.
+
+Four milestones in, the model has robust skill on exactly one variable, and it
+is the one design §3.1 predicted for the reason §3.1 gave — cohort inertia.
+Every added mechanism has been structurally necessary and has cost backtest
+skill. That is now a pattern rather than an accident, and the design's §15.1
+merge rule has been overridden three times on the same argument: reachable-set
+coherence is not measurable by hold-out skill. If that argument is wrong, the
+last three milestones were a mistake.
+
+### For M4
+
+1. **Time-varying region membership**, or accept that part of the convergence
+   signal is compositional and stop scoring against it.
+2. **Regional technology deployment** — the one prediction the model was
+   committed to and failed by construction.
+3. **Regional age structure at t0.** Both regions currently start from the world
+   age distribution, which is badly wrong for 1950 and is the most likely cause
+   of the working-age share being the worst channel (−648%).

@@ -10,8 +10,8 @@ for the feasibility assessment and full design, and
 structure and priors, recorded with whether it was made before or after the
 test window was revealed.
 
-Status: **M2** — single-region world model with an explicit technology layer,
-inferred per-channel structural error, and rolling-origin evaluation.
+Status: **M3** — two-region world model, two low-carbon technology families,
+cross-series error covariance, rolling-origin evaluation.
 
 ---
 
@@ -25,108 +25,91 @@ python -m civsim backtest     # fit 1950-1990, score 1990-2020, write fan chart
 python -m civsim stability    # re-run across seeds; report only robust verdicts
 python -m civsim rolling      # four origins; pooled skill + non-stationarity test
 python -m civsim rolling --control   # fixed test window; isolates the confound
-pytest                        # 49 tests
+pytest                        # 54 tests
 ```
 
-`backtest` writes `out/m2_backtest_fan.png`, plus a run manifest and a protocol
+`backtest` writes `out/m3_backtest_fan.png`, plus a run manifest and a protocol
 manifest recording the snapshot hash, the freeze, and the reveal.
 
 ---
 
-## What M2 actually found
+## What M3 actually found
 
-Robust skill on **1 of 9** series (population), across four rolling origins and
-four seeds. Everything else is a robust loss or sign-unstable. The `stability`
-and `rolling` commands exist so this cannot be reported any other way.
+Robust skill on **1 of 13** series (population, +33.7% across seeds). Everything
+else is a robust loss or sign-unstable.
 
-### The model knows how wrong it is, per channel
+### The trade-off M3 forced into the open
 
-M1 asserted the model was equally wrong about everything (a uniform 6%
-structural scale). Measured, that was off by more than an order of magnitude:
+The first two-region build had the **lagging region's capital per head overtake
+the leader's** by 2020 (ratio 4.41 → 0.88). A shared global technology frontier
+plus Solow accumulation drives full convergence and then overshoot. Fixed with
+absorptive capacity (design §8, L3): a region captures the frontier only to the
+extent its own development lets it. Overshoot gone — 0 of 38 draws cross over.
 
-| series | inferred discrepancy | M1 assumed |
+And it made the backtest worse:
+
+| | without absorption | with absorption |
 |---|---|---|
-| low-carbon share | 11–46% | 6% |
-| CO₂ emissions | 6.3–9.6% | 6% |
-| primary energy | 6.2–9.1% | 6% |
-| GDP | 3.7–5.5% | 6% |
-| population, CO₂ ppm, age shares | 2.3–4.3% | 6% |
+| robust skill | 2/13 | **1/13** |
+| high-income GDP share | **+40.6%** robust skill | −73.7% robust loss |
+| population | +44.1% | +33.7% |
 
-The scale is not assigned per series — that would be fitting the likelihood. It
-is given an inverse-gamma prior and integrated out analytically, so each series'
-Gaussian becomes a multivariate Student-t. Residuals then enter through
-`log(b + Q/2)` instead of `Q`: a badly modelled channel is charged a logarithmic
-penalty and reports itself as badly modelled, rather than a quadratic one that
-overwhelms every other channel. No sampled parameters added.
+The no-absorption version fitted the observed 1950–2020 convergence of the income
+split **by over-converging**, and paid for it with an absurd extrapolation
+starting just past the scored window. The parameters that reproduce historical
+catch-up imply overshoot afterwards; the model can do one or the other.
 
-**Effect, same five series and seeds, only the likelihood changed:**
+**The absorption version ships**, for the same reason M1's technology layer did:
+hold-out skill over 1950–2020 cannot see an overshoot that begins in 2020, and a
+model where poor regions overtake rich ones is unusable for every forward
+question this project exists to ask.
 
-| series | M0 | M1 | M2 |
-|---|---|---|---|
-| population | +49.4% | +12.6% | **+65.0%** robust |
-| GDP | −38.5% | −38.7% | −63.0% |
-| primary energy | −43.2% | −106.7% | −199.3% |
-| CO₂ emissions | −54.6% | −34.1% | −88.9% |
-| CO₂ ppm | −451.8% | −81.2% | −83.5% |
+### Errors are correlated across channels, and now counted once
 
-Population's robust skill is restored and exceeds M0's. The other channels look
-worse, and the reason matters more than the numbers: the likelihood no longer
-forces the calibration to chase a channel the model cannot structurally fit, so
-it stops distorting shared parameters toward energy. **M1's −107% on energy was
-flattered**, bought by degrading population's fit. M2 is not worse at energy;
-M2 stopped hiding how bad energy was.
+M2 scored each series independently. Emissions are computed *from* energy here,
+so that counted one error twice. The residual matrix is now modelled with a
+separable covariance and an inverse-Wishart prior integrated out, giving a
+matrix-t whose key term is a **determinant** rather than a sum of per-series
+penalties: aligned residuals stop being separate evidence.
 
-### Non-stationarity, measured rather than asserted
+Measured error correlations:
 
-Four origins (1975, 1985, 1995, 2005), each running the full protocol
-independently — own prior, own SMC, own freeze, own reveal. Scored points rise
-from 6 to 28 per series.
+| pair | correlation |
+|---|---|
+| energy ↔ emissions | **+0.92** |
+| emissions ↔ GDP | +0.73 |
+| energy ↔ GDP | +0.66 |
 
-Skill degrades as the origin moves later. That alone is confounded: later
-origins have shorter test windows, so the trend could just be three noisy points.
-`--control` scores every origin on the *same* 1995–2020 window, moving only the
-calibration end — asymmetric in the useful direction, since later origins then
-have strictly **more** data.
+Likelihood discrimination fell from 105 to 89 nats — the correct direction, since
+the extra sharpness was an artefact.
 
-It still degrades: 6 of 9 series, mean −144 skill points per decade. **Adding
-more recent calibration data makes forecasts worse.** First quantitative
-confirmation of design §2.2 in this project rather than an appeal to it.
+### Two low-carbon technology families
 
-One alternative reading must travel with that finding: more data also tightens
-the posterior, and CRPS punishes confident-and-wrong harder than vague. So the
-mechanism may be less "the world changed regime" than "a structurally wrong
-model given more data becomes more confident without becoming more accurate."
-This experiment cannot separate the two, and the second is arguably the sharper
-claim.
+The observed low-carbon share rises, sits on a twenty-year plateau (11.3% in 1990
+→ 12.6% in 2010), then resumes. One family with one learning curve cannot produce
+that at any parameter value. Split into dispatchable (hydro/nuclear: slow
+learning, hard ceiling) and modular (wind/solar: steep learning, tiny base), the
+plateau emerges as the gap between one saturating and the other arriving. Prior
+draws producing that shape went from 0% to 4%. Inferred discrepancy on the
+channel improved from 11–46% to 21.5% — still the worst channel by a factor of
+two.
 
-| series | pooled (18 pts) | 1975 | 1985 | 1995 | verdict |
-|---|---|---|---|---|---|
-| population | **+63.5%** | +74% | +43% | +74% | **robust skill** |
-| useful exergy efficiency | +19.3% | +78% | −71% | −47% | unstable |
-| working-age share | +8.5% | +82% | −135% | −499% | unstable |
-| GDP | −20.6% | −35% | +57% | −41% | unstable |
-| CO₂ ppm | −23.8% | +17% | −150% | −40% | unstable |
-| CO₂ emissions | −38.9% | −84% | +70% | +10% | unstable |
-| old-age share | −86.5% | −216% | −25% | +50% | unstable |
-| primary energy | −138.1% | −120% | −81% | −1087% | robust loss |
-| low-carbon share | −425.1% | −66% | −616% | −1281% | robust loss |
+### A prediction designed to fail
 
-### The technology module is still the worst-modelled part
+Technology is global in M3, so `hi_co2_share` must equal `hi_energy_share`
+exactly. Observation says 38% of energy but 33% of CO₂ in 2020. It is scored
+anyway and fails (−200%). The gap measures how much regional technology
+heterogeneity matters — worth more than omitting a prediction the model is
+committed to making.
 
-The low-carbon share carries 11–46% structural error and is a robust loss at
-every origin. M1 retained the technology layer on the argument that it changes
-the reachable set of futures even though it does not improve backtest skill.
-That argument still holds and the evidence against the layer is now sharper: it
-remains **unfalsified, not validated**, and it is the first thing M3 should
-attack.
+### Four milestones in
 
-### Why the ordering mattered
-
-The exergy series added in M2 is C-grade — published estimates disagree on the
-level by several points while agreeing on the trend. Adding a series that
-uncertain under M1's uniform likelihood would have repeated M1's contamination
-exactly. Under the inferred scale it comes out at 3.0–4.9% and neither dominates
-nor is ignored. Item 1 is what made item 2 safe.
+The model has robust skill on exactly one variable, and it is the one design §3.1
+predicted for the reason §3.1 gave: cohort inertia. Every added mechanism has
+been structurally necessary and has cost backtest skill. The design's §15.1 merge
+rule has now been overridden three times on the same argument — that reachable-set
+coherence is not measurable by hold-out skill. If that argument is wrong, the last
+three milestones were a mistake, and nothing in the backtest can settle it.
 
 ---
 
@@ -137,7 +120,7 @@ civsim/
   core/        SFC kernel: stocks, paired flows, conservation ledger,
                sectoral financial ledger, explicit-Euler engine
   data/        A/B/C-graded snapshot registry with content hashing
-  modules/     population -> technology -> energy -> economy -> carbon
+  modules/     pop_R -> technology -> energy_R -> economy_R -> aggregate -> carbon
   uncertainty/ priors, tempered SMC, correlated-discrepancy likelihood
   backtest/    hold-out gate, baselines, CRPS/PIT scoring, runner
   viz/         fan charts with credible-horizon greying

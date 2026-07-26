@@ -82,14 +82,22 @@ def _stage_weights(width: float, stages: int, start_age: float) -> list[float]:
 
 
 class Population(Module):
-    name = "population"
-
     def __init__(
         self,
         initial_total: float,
         initial_working_share: float,
         initial_old_share: float,
+        region: str = "",
     ) -> None:
+        #: Region prefix. Empty for a single-region run; "hi_"/"lo_" for M3.
+        #: Every stock, flow and diagnostic this module owns carries it, and
+        #: every regional quantity it reads is looked up with it, so two
+        #: instances cannot collide or silently read each other's state.
+        self.region = region
+        # `name` must be per-instance, not a class attribute: the engine keys
+        # flow ownership by module name, so two regional instances sharing one
+        # name would let either set the other's rates.
+        self.name = f"population_{region or 'world'}"
         total = float(initial_total)
         self.initial_total = total
         working = total * float(initial_working_share)
@@ -111,13 +119,15 @@ class Population(Module):
 
     # ------------------------------------------------------------- naming
 
-    @staticmethod
-    def youth(i: int) -> str:
-        return f"pop_youth_{i}"
+    @property
+    def r(self) -> str:
+        return self.region
 
-    @staticmethod
-    def working(i: int) -> str:
-        return f"pop_working_{i}"
+    def youth(self, i: int) -> str:
+        return f"{self.region}pop_youth_{i}"
+
+    def working(self, i: int) -> str:
+        return f"{self.region}pop_working_{i}"
 
     # ------------------------------------------------------------- stocks
 
@@ -138,47 +148,48 @@ class Population(Module):
                       description=f"Population aged {lo:.0f}-{hi:.0f}.")
             )
         out.append(
-            Stock("pop_old", Quantity.PERSONS, self.initial_old,
+            Stock(f"{self.region}pop_old", Quantity.PERSONS, self.initial_old,
                   description="Population aged 65+.")
         )
         out.append(
-            Stock("unborn_pool", Quantity.PERSONS, 1e11, kind=StockKind.BOUNDARY,
+            Stock(f"{self.region}unborn_pool", Quantity.PERSONS, 1e11, kind=StockKind.BOUNDARY,
                   description="Reservoir births are drawn from.")
         )
         out.append(
-            Stock("deceased_pool", Quantity.PERSONS, 0.0, kind=StockKind.BOUNDARY,
+            Stock(f"{self.region}deceased_pool", Quantity.PERSONS, 0.0, kind=StockKind.BOUNDARY,
                   description="Cumulative deaths.")
         )
         return out
 
     def flows(self) -> list[FlowSpec]:
         P = Quantity.PERSONS
-        out = [FlowSpec("births", P, "unborn_pool", self.youth(0))]
+        R = self.region
+        out = [FlowSpec(f"{R}births", P, f"{R}unborn_pool", self.youth(0))]
         for i in range(YOUTH_STAGES - 1):
             out.append(
-                FlowSpec(f"age_youth_{i}", P, self.youth(i), self.youth(i + 1))
+                FlowSpec(f"{R}age_youth_{i}", P, self.youth(i), self.youth(i + 1))
             )
         out.append(
-            FlowSpec("maturing", P, self.youth(YOUTH_STAGES - 1), self.working(0))
+            FlowSpec(f"{R}maturing", P, self.youth(YOUTH_STAGES - 1), self.working(0))
         )
         for i in range(WORKING_STAGES - 1):
             out.append(
                 FlowSpec(
-                    f"age_working_{i}", P, self.working(i), self.working(i + 1)
+                    f"{R}age_working_{i}", P, self.working(i), self.working(i + 1)
                 )
             )
         out.append(
-            FlowSpec("retiring", P, self.working(WORKING_STAGES - 1), "pop_old")
+            FlowSpec(f"{R}retiring", P, self.working(WORKING_STAGES - 1), f"{R}pop_old")
         )
         for i in range(YOUTH_STAGES):
             out.append(
-                FlowSpec(f"deaths_youth_{i}", P, self.youth(i), "deceased_pool")
+                FlowSpec(f"{R}deaths_youth_{i}", P, self.youth(i), f"{R}deceased_pool")
             )
         for i in range(WORKING_STAGES):
             out.append(
-                FlowSpec(f"deaths_working_{i}", P, self.working(i), "deceased_pool")
+                FlowSpec(f"{R}deaths_working_{i}", P, self.working(i), f"{R}deceased_pool")
             )
-        out.append(FlowSpec("deaths_old", P, "pop_old", "deceased_pool"))
+        out.append(FlowSpec(f"{R}deaths_old", P, f"{R}pop_old", f"{R}deceased_pool"))
         return out
 
     # -------------------------------------------------------- diagnostics
@@ -188,10 +199,10 @@ class Population(Module):
     ) -> dict[str, float]:
         youth = sum(view.stock(self.youth(i)) for i in range(YOUTH_STAGES))
         working = sum(view.stock(self.working(i)) for i in range(WORKING_STAGES))
-        old = view.stock("pop_old")
+        old = view.stock(f"{self.region}pop_old")
         total = youth + working + old
 
-        k = view.stock("capital")
+        k = view.stock(f"{self.region}capital")
         k_per_head = (k * 1e9) / total if total > 0 else 0.0
 
         fert = _saturating(
@@ -212,23 +223,24 @@ class Population(Module):
 
         deaths = (youth * m_youth + working * m_working + old * m_old) / 1000.0
 
+        R = self.region
         return {
-            "population_mn": total / 1e6,
-            "working_age_share_pct": 100.0 * working / total,
-            "old_age_share_pct": 100.0 * old / total,
-            "youth_share_pct": 100.0 * youth / total,
-            "capital_per_head": k_per_head,
-            "fertility_rate": fert,
-            "mortality_scale": scale,
-            "crude_death_rate": 1000.0 * deaths / total,
-            "crude_birth_rate": working * fert / total,
-            "old_age_dependency": old / working if working > 0 else float("nan"),
+            f"{R}population_mn": total / 1e6,
+            f"{R}working_age_share_pct": 100.0 * working / total,
+            f"{R}old_age_share_pct": 100.0 * old / total,
+            f"{R}youth_share_pct": 100.0 * youth / total,
+            f"{R}capital_per_head": k_per_head,
+            f"{R}fertility_rate": fert,
+            f"{R}mortality_scale": scale,
+            f"{R}crude_death_rate": 1000.0 * deaths / total,
+            f"{R}crude_birth_rate": working * fert / total,
+            f"{R}old_age_dependency": old / working if working > 0 else float("nan"),
             # Labour now tracks the working-age compartment, so the demographic
             # transition reaches production through a channel that exists.
-            "labour": working * params["participation_rate"],
-            "_m_youth": m_youth,
-            "_m_working": m_working,
-            "_m_old": m_old,
+            f"{R}labour": working * params["participation_rate"],
+            f"{R}_m_youth": m_youth,
+            f"{R}_m_working": m_working,
+            f"{R}_m_old": m_old,
         }
 
     # --------------------------------------------------------------- rates
@@ -236,30 +248,33 @@ class Population(Module):
     def rates(
         self, view: StateView, params: Mapping[str, Any]
     ) -> dict[str, float]:
+        R = self.region
         working_total = sum(
             view.stock(self.working(i)) for i in range(WORKING_STAGES)
         )
         youth_rate = YOUTH_STAGES / YOUTH_YEARS
         working_rate = WORKING_STAGES / WORKING_YEARS
-        m_y = view.diag("_m_youth") / 1000.0
-        m_w = view.diag("_m_working") / 1000.0
+        m_y = view.diag(f"{R}_m_youth") / 1000.0
+        m_w = view.diag(f"{R}_m_working") / 1000.0
 
         out: dict[str, float] = {
-            "births": working_total * view.diag("fertility_rate") / 1000.0,
-            "deaths_old": view.stock("pop_old") * view.diag("_m_old") / 1000.0,
+            f"{R}births": working_total * view.diag(f"{R}fertility_rate") / 1000.0,
+            f"{R}deaths_old": (
+                view.stock(f"{R}pop_old") * view.diag(f"{R}_m_old") / 1000.0
+            ),
         }
         for i in range(YOUTH_STAGES):
             v = view.stock(self.youth(i))
-            out[f"deaths_youth_{i}"] = v * m_y
+            out[f"{R}deaths_youth_{i}"] = v * m_y
             if i < YOUTH_STAGES - 1:
-                out[f"age_youth_{i}"] = v * youth_rate
+                out[f"{R}age_youth_{i}"] = v * youth_rate
             else:
-                out["maturing"] = v * youth_rate
+                out[f"{R}maturing"] = v * youth_rate
         for i in range(WORKING_STAGES):
             v = view.stock(self.working(i))
-            out[f"deaths_working_{i}"] = v * m_w
+            out[f"{R}deaths_working_{i}"] = v * m_w
             if i < WORKING_STAGES - 1:
-                out[f"age_working_{i}"] = v * working_rate
+                out[f"{R}age_working_{i}"] = v * working_rate
             else:
-                out["retiring"] = v * working_rate
+                out[f"{R}retiring"] = v * working_rate
         return out

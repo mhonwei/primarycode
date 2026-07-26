@@ -81,14 +81,22 @@ DOMAINS = ("productivity", "efficiency", "lowcarbon")
 class Technology(Module):
     name = "technology"
 
+    #: The two low-carbon technology families. Names are used to build stock,
+    #: flow and parameter keys, so they are part of the interface.
+    FAMILIES = ("dispatchable", "modular")
+
     def __init__(
         self,
         t0: float,
         initial_lowcarbon_ej: float,
+        initial_modular_ej: float,
+        regions: tuple[str, ...] = ("",),
         frontier_pool: float = 40.0,
     ) -> None:
+        self.regions = tuple(regions)
         self.t0 = float(t0)
         self.initial_lowcarbon_ej = float(initial_lowcarbon_ej)
+        self.initial_modular_ej = float(initial_modular_ej)
         self.frontier_pool = float(frontier_pool)
 
     # ------------------------------------------------------------- stocks
@@ -125,32 +133,50 @@ class Technology(Module):
                     description=f"Retired {d} knowledge.",
                 )
             )
-        # Low-carbon capacity, in EJ/yr of primary-equivalent supply.
+        # Low-carbon capacity, split into two technology families.
         #
-        # Two quantities are needed and they are not the same: the learning
-        # curve runs on *cumulative* deployment (experience is never unlearned)
-        # while the supply share runs on *current* capacity (plant retires).
-        # Keeping capacity and retirement as separate stocks gives both --
-        # cumulative is their sum -- without a counter that the conservation
-        # ledger cannot see.
-        out.append(
-            Stock(
-                "lowcarbon_capacity_ej",
-                Quantity.ENERGY,
-                self.initial_lowcarbon_ej,
-                kind=StockKind.BOUNDARY,
-                description="Operating low-carbon supply, EJ/yr.",
+        # M2 had one. Observed world low-carbon share goes 3.0% (1950) -> 11.3%
+        # (1990) -> 12.4% (2000) -> 12.6% (2010) -> 16.4% (2020): a rise, a
+        # twenty-year *plateau*, then a resumption. One family with one learning
+        # curve and one ceiling cannot produce that at any parameter value --
+        # the same structural impossibility as M0's inability to plateau
+        # emissions, and the reason this was the worst-modelled channel in the
+        # system (11-46% inferred discrepancy, robust loss at every origin).
+        #
+        # Two families reproduce it without being told to. Dispatchable
+        # (hydro, nuclear) learns slowly and runs into a resource and social
+        # ceiling, which is what ends the first wave. Modular (wind, solar)
+        # starts from a base small enough to be invisible for decades and learns
+        # steeply, so it needs that long to climb out and only then bends the
+        # curve up again. The plateau is the gap between one saturating and the
+        # other arriving -- an emergent interval, not a fitted one.
+        #
+        # Cost: five parameters. Against §11.6 that is real, and it is spent
+        # here because this channel is the weakest in the model by a wide
+        # margin and because the shape being missed is qualitative, not a
+        # question of degree.
+        for fam, init in (
+            ("dispatchable", self.initial_lowcarbon_ej),
+            ("modular", self.initial_modular_ej),
+        ):
+            out.append(
+                Stock(
+                    f"lowcarbon_{fam}_ej",
+                    Quantity.ENERGY,
+                    init,
+                    kind=StockKind.BOUNDARY,
+                    description=f"Operating {fam} low-carbon supply, EJ/yr.",
+                )
             )
-        )
-        out.append(
-            Stock(
-                "lowcarbon_retired_ej",
-                Quantity.ENERGY,
-                0.0,
-                kind=StockKind.BOUNDARY,
-                description="Retired low-carbon capacity, EJ/yr equivalent.",
+            out.append(
+                Stock(
+                    f"lowcarbon_{fam}_retired_ej",
+                    Quantity.ENERGY,
+                    0.0,
+                    kind=StockKind.BOUNDARY,
+                    description=f"Retired {fam} capacity, EJ/yr equivalent.",
+                )
             )
-        )
         out.append(
             Stock(
                 "deployment_pool",
@@ -181,22 +207,23 @@ class Technology(Module):
                     f"obsolete_{d}",
                 )
             )
-        out.append(
-            FlowSpec(
-                "lowcarbon_deployment",
-                Quantity.ENERGY,
-                "deployment_pool",
-                "lowcarbon_capacity_ej",
+        for fam in self.FAMILIES:
+            out.append(
+                FlowSpec(
+                    f"deploy_{fam}",
+                    Quantity.ENERGY,
+                    "deployment_pool",
+                    f"lowcarbon_{fam}_ej",
+                )
             )
-        )
-        out.append(
-            FlowSpec(
-                "lowcarbon_retirement",
-                Quantity.ENERGY,
-                "lowcarbon_capacity_ej",
-                "lowcarbon_retired_ej",
+            out.append(
+                FlowSpec(
+                    f"retire_{fam}",
+                    Quantity.ENERGY,
+                    f"lowcarbon_{fam}_ej",
+                    f"lowcarbon_{fam}_retired_ej",
+                )
             )
-        )
         return out
 
     # -------------------------------------------------------- diagnostics
@@ -207,66 +234,91 @@ class Technology(Module):
         a_prod = view.stock("knowledge_productivity")
         a_eff = view.stock("knowledge_efficiency")
         a_low = view.stock("knowledge_lowcarbon")
-        capacity = view.stock("lowcarbon_capacity_ej")
-        cumulative = capacity + view.stock("lowcarbon_retired_ej")
 
-        # --- Wright learning curve on cumulative low-carbon deployment ----
-        # Cost falls by `learning_rate` per doubling of cumulative experience;
-        # research shifts the intercept down separately. Experience is never
-        # unlearned, which is why this runs on cumulative rather than capacity.
-        b = -math.log(1.0 - params["learning_rate"]) / math.log(2.0)
-        cost_lowcarbon = (
-            params["lowcarbon_cost_0"]
-            * (cumulative / self.initial_lowcarbon_ej) ** (-b)
-            * a_low ** (-params["rnd_cost_elasticity"])
-        )
+        out: dict[str, float] = {}
+        total_capacity = 0.0
+        for fam in self.FAMILIES:
+            capacity = view.stock(f"lowcarbon_{fam}_ej")
+            cumulative = capacity + view.stock(f"lowcarbon_{fam}_retired_ej")
+            initial = (
+                self.initial_lowcarbon_ej
+                if fam == "dispatchable"
+                else self.initial_modular_ej
+            )
 
-        # --- Diffusion: niche floor plus cost-driven mainstream adoption ---
-        #
-        # The cost-driven logistic alone deadlocks, and the deadlock is total:
-        # learning needs deployment, deployment needs cost parity, cost parity
-        # needs learning. The first M1 run showed exactly that -- the low-carbon
-        # share fell from 2.5% to 0.03% over seventy years while retirement ate
-        # a capacity that was never replaced, because the target share sat at
-        # 1/(1+e^18). A technology module that cannot represent any transition
-        # is not a technology module.
-        #
-        # The floor is not a numerical patch. Early low-carbon deployment
-        # genuinely does not happen at cost parity: hydro was competitive from
-        # the start, and nuclear and solar were both bought for decades by
-        # policy and niche markets that did not care about the market price.
-        # That niche deployment is what pays for the learning that later makes
-        # the mainstream logistic bite -- the standard niche-to-regime story,
-        # and how solar actually happened.
-        ratio = cost_lowcarbon / params["fossil_cost"]
-        mainstream = 1.0 / (
-            1.0 + math.exp(params["adoption_sharpness"] * (ratio - 1.0))
-        )
-        floor = params["niche_share_floor"]
-        target_share = floor + (params["lowcarbon_ceiling"] - floor) * mainstream
-        target_share = min(target_share, params["lowcarbon_ceiling"])
+            # Wright learning on cumulative experience, which is never
+            # unlearned -- hence cumulative rather than current capacity.
+            lr = params[f"learning_rate_{fam}"]
+            b = -math.log(1.0 - lr) / math.log(2.0)
+            cost = (
+                params[f"lowcarbon_cost_0_{fam}"]
+                * (cumulative / initial) ** (-b)
+                * a_low ** (-params["rnd_cost_elasticity"])
+            )
 
-        # --- Efficiency: energy per unit K-L composite -------------------
+            # Niche floor plus cost-driven mainstream adoption. The floor is
+            # not a numerical patch: early low-carbon deployment genuinely does
+            # not happen at cost parity -- hydro was competitive from the start,
+            # and nuclear and solar were both bought for decades by policy and
+            # niche markets that did not care about the market price. That niche
+            # deployment pays for the learning that later makes the mainstream
+            # logistic bite. Without it the module deadlocks outright: learning
+            # needs deployment, deployment needs parity, parity needs learning.
+            ratio = cost / params["fossil_cost"]
+            mainstream = 1.0 / (
+                1.0 + math.exp(params["adoption_sharpness"] * (ratio - 1.0))
+            )
+            ceiling = params[f"ceiling_{fam}"]
+            floor = min(params[f"niche_floor_{fam}"], ceiling)
+            target = floor + (ceiling - floor) * mainstream
+
+            out[f"cost_{fam}"] = cost
+            out[f"cost_ratio_{fam}"] = ratio
+            out[f"target_share_{fam}"] = target
+            out[f"capacity_{fam}"] = capacity
+            total_capacity += capacity
+
         energy_intensity_mult = a_eff ** (-params["efficiency_elasticity"])
 
-        # --- Productivity ------------------------------------------------
+        # Absorptive capacity (design §8, L3). Without it a shared global
+        # frontier plus Solow accumulation drives full convergence and then
+        # overshoot: the first two-region build had the lagging region's capital
+        # per head *overtake* the leading region's by 2020 (ratio 4.41 -> 0.88).
+        # Poor regions overtaking rich ones is not a subtle calibration error.
+        #
+        # A region only captures the frontier to the extent it can absorb it
+        # (Nelson-Phelps; Benhabib-Spiegel). Absorption rises with the region's
+        # own development, so catch-up is possible and self-reinforcing but
+        # never automatic, which is what conditional convergence looks like.
+        k_head = {
+            r: max(view.diag(f"{r}capital_per_head"), 1e-9) for r in self.regions
+        }
+        frontier_k = max(k_head.values())
+        for r in self.regions:
+            rel = min(k_head[r] / frontier_k, 1.0)
+            absorption = params["absorption_floor"] + (
+                1.0 - params["absorption_floor"]
+            ) * rel ** params["absorption_theta"]
+            out[f"tfp_multiplier_{r}"] = a_prod ** (
+                params["tfp_elasticity"] * absorption
+            )
+            out[f"absorption_{r}"] = absorption
         tfp_mult = a_prod ** params["tfp_elasticity"]
 
-        return {
-            "knowledge_productivity_idx": a_prod,
-            "knowledge_efficiency_idx": a_eff,
-            "knowledge_lowcarbon_idx": a_low,
-            "lowcarbon_unit_cost": cost_lowcarbon,
-            "lowcarbon_cost_ratio": ratio,
-            "lowcarbon_target_share": target_share,
-            "lowcarbon_capacity": capacity,
-            "lowcarbon_cumulative": cumulative,
-            "energy_intensity_multiplier": energy_intensity_mult,
-            "tfp_multiplier": tfp_mult,
-            "frontier_remaining_productivity": (
-                view.stock("frontier_pool_productivity") / self.frontier_pool
-            ),
-        }
+        out.update(
+            {
+                "knowledge_productivity_idx": a_prod,
+                "knowledge_efficiency_idx": a_eff,
+                "knowledge_lowcarbon_idx": a_low,
+                "lowcarbon_capacity": total_capacity,
+                "energy_intensity_multiplier": energy_intensity_mult,
+                "tfp_multiplier": tfp_mult,
+                "frontier_remaining_productivity": (
+                    view.stock("frontier_pool_productivity") / self.frontier_pool
+                ),
+            }
+        )
+        return out
 
     # --------------------------------------------------------------- rates
 
@@ -304,17 +356,20 @@ class Technology(Module):
             out[f"discovery_{d}"] = min(discovery, pool * 0.5)
             out[f"obsolescence_{d}"] = params["knowledge_obsolescence"] * a
 
-        # Deployment closes the gap to the target share at a finite rate. The
-        # inertia is not a smoothing device: it is the design's point about
-        # depreciation clocks (§3.3). Capacity is built by an industry that
-        # cannot double overnight, and that constraint is what bounds how fast
-        # any transition can physically go, whatever the cost says.
+        # Deployment closes the gap to each family's target share at a finite
+        # rate. The inertia is not a smoothing device: it is the design's point
+        # about depreciation clocks (§3.3). Capacity is built by an industry
+        # that cannot double overnight, and that constraint is what bounds how
+        # fast any transition can physically go, whatever the cost says.
         primary = view.diag("primary_energy_ej")
-        capacity = view.stock("lowcarbon_capacity_ej")
-        target = view.diag("lowcarbon_target_share") * primary
-        out["lowcarbon_deployment"] = params["deployment_speed"] * max(
-            target - capacity, 0.0
-        )
-        out["lowcarbon_retirement"] = params["lowcarbon_retirement_rate"] * capacity
+        for fam in self.FAMILIES:
+            capacity = view.stock(f"lowcarbon_{fam}_ej")
+            target = view.diag(f"target_share_{fam}") * primary
+            out[f"deploy_{fam}"] = params[f"deployment_speed_{fam}"] * max(
+                target - capacity, 0.0
+            )
+            out[f"retire_{fam}"] = (
+                params[f"retirement_rate_{fam}"] * capacity
+            )
 
         return out

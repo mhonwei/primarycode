@@ -71,10 +71,14 @@ def test_carbon_moves_out_of_reserves_not_out_of_nothing(params, snapshot):
 def test_energy_extraction_depletes_reserves(params, snapshot):
     eng = build_engine(params, snapshot, t0=1950.0)
     traj = eng.run(1950.0, 2020.0)
-    drawn = traj.stocks["energy_reserves"][0] - traj.stocks["energy_reserves"][-1]
-    dissipated = traj.stocks["dissipated_heat"][-1]
-    assert drawn > 0
-    assert abs(drawn - dissipated) / drawn < 1e-12
+    for r in ("hi_", "lo_"):
+        drawn = (
+            traj.stocks[f"{r}energy_reserves"][0]
+            - traj.stocks[f"{r}energy_reserves"][-1]
+        )
+        dissipated = traj.stocks[f"{r}dissipated_heat"][-1]
+        assert drawn > 0
+        assert abs(drawn - dissipated) / drawn < 1e-12
 
 
 # ------------------------------------------------------- deliberate sins
@@ -245,9 +249,10 @@ def test_conversion_efficiency_stays_a_fraction(params, snapshot):
     """
     eng = build_engine(params, snapshot, t0=1950.0)
     traj = eng.run(1950.0, 2020.0)
-    eff = traj.diagnostics["conversion_efficiency"]
-    assert np.all(eff > 0.0) and np.all(eff < 1.0)
-    assert np.all(traj.diagnostics["useful_work_ej"] > 0.0)
+    for r in ("hi_", "lo_"):
+        eff = traj.diagnostics[f"{r}conversion_efficiency"]
+        assert np.all(eff > 0.0) and np.all(eff < 1.0)
+        assert np.all(traj.diagnostics[f"{r}useful_work_ej"] > 0.0)
     assert np.all(np.isreal(traj.diagnostics["gdp_bn2011ppp"]))
 
 

@@ -33,6 +33,57 @@ WORLD_CSV = BUNDLED_DIR / "world_aggregates_1950_2020.csv"
 # --------------------------------------------------------------------- meta
 
 SERIES_META: dict[str, SeriesMeta] = {
+    # --- regional split (M3) ---------------------------------------------
+    # Stored as SHARES of the world total, not as levels. The world aggregates
+    # are the better-measured quantity, so making them exactly reconstructible
+    # keeps their grade intact and confines the C-grade uncertainty to the
+    # split alone. It also makes "the regions sum to the world" an identity
+    # rather than something to be checked.
+    #
+    # "High income" is roughly the World Bank group: Western Europe, North
+    # America, Japan, Australasia, plus later additions. The boundary moves over
+    # time in reality and is held fixed here, which is the main reason these are
+    # C-grade.
+    "hi_pop_share_pct": SeriesMeta(
+        name="hi_pop_share_pct",
+        unit="% of world population",
+        grade=Grade.C,
+        source="Reconstructed from World Bank / Maddison / Energy Institute groupings",
+        citation=(
+            "High-income share of world population, ~32% in 1950 falling to ~16%. Group membership held fixed at its modern definition, "
+            "which is the principal source of error."
+        ),
+    ),
+    "hi_gdp_share_pct": SeriesMeta(
+        name="hi_gdp_share_pct",
+        unit="% of world GDP (PPP)",
+        grade=Grade.C,
+        source="Reconstructed from World Bank / Maddison / Energy Institute groupings",
+        citation=(
+            "High-income share of world PPP output, ~68% to ~42%. Group membership held fixed at its modern definition, "
+            "which is the principal source of error."
+        ),
+    ),
+    "hi_energy_share_pct": SeriesMeta(
+        name="hi_energy_share_pct",
+        unit="% of world primary energy",
+        grade=Grade.C,
+        source="Reconstructed from World Bank / Maddison / Energy Institute groupings",
+        citation=(
+            "High-income share of primary energy, ~76% to ~38%. Group membership held fixed at its modern definition, "
+            "which is the principal source of error."
+        ),
+    ),
+    "hi_co2_share_pct": SeriesMeta(
+        name="hi_co2_share_pct",
+        unit="% of world fossil CO2",
+        grade=Grade.C,
+        source="Reconstructed from World Bank / Maddison / Energy Institute groupings",
+        citation=(
+            "High-income share of fossil CO2, ~80% to ~33%. Group membership held fixed at its modern definition, "
+            "which is the principal source of error."
+        ),
+    ),
     "population_mn": SeriesMeta(
         name="population_mn",
         unit="million persons",

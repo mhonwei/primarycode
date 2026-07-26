@@ -75,4 +75,4 @@ def test_full_model_keeps_books_balanced():
     assert abs(eng.financial.residual()) < 1e-6
     # And the circuit actually moved money, so the check is not vacuous.
     assert len(eng.financial.journal) > 200
-    assert any(t.label == "wages" for t in eng.financial.journal)
+    assert any(t.label.endswith("wages") for t in eng.financial.journal)

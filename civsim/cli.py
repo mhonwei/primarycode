@@ -2,7 +2,7 @@
 
     python -m civsim selftest    conservation and protocol checks, no fitting
     python -m civsim prior       print the prior
-    python -m civsim backtest    the M2 run: fit 1950-1990, score 1990-2020
+    python -m civsim backtest    the M3 run: fit 1950-1990, score 1990-2020
     python -m civsim stability   re-run across seeds; only robust verdicts
     python -m civsim rolling     rolling-origin evaluation across four cutoffs
 """
@@ -69,16 +69,16 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     print(report.verdicts())
 
     OUT.mkdir(exist_ok=True)
-    fig = fan_figure(report, OUT / "m2_backtest_fan.png")
-    report.write_manifest(OUT / "m2_backtest_manifest.json")
-    report.holdout.write_manifest(OUT / "m2_protocol.json")
+    fig = fan_figure(report, OUT / "m3_backtest_fan.png")
+    report.write_manifest(OUT / "m3_backtest_manifest.json")
+    report.holdout.write_manifest(OUT / "m3_protocol.json")
     print(f"\nwrote {fig}")
-    print(f"wrote {OUT / 'm2_backtest_manifest.json'}")
-    print(f"wrote {OUT / 'm2_protocol.json'}")
+    print(f"wrote {OUT / 'm3_backtest_manifest.json'}")
+    print(f"wrote {OUT / 'm3_protocol.json'}")
 
     n = len(report.scores)
     print(
-        f"\nM2 exit criterion: model beat every baseline on "
+        f"\nM3 exit criterion: model beat every baseline on "
         f"{report.n_beaten}/{n} series."
     )
     return 0
@@ -157,8 +157,8 @@ def cmd_rolling(args: argparse.Namespace) -> int:
     print("\n" + res.non_stationarity_summary())
 
     OUT.mkdir(exist_ok=True)
-    res.write_manifest(OUT / "m2_rolling_manifest.json")
-    print(f"\nwrote {OUT / 'm2_rolling_manifest.json'}")
+    res.write_manifest(OUT / "m3_rolling_manifest.json")
+    print(f"\nwrote {OUT / 'm3_rolling_manifest.json'}")
 
     robust = sum(1 for n in res.series if res.verdict(n) == "ROBUST SKILL")
     print(

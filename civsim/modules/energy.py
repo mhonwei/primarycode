@@ -36,8 +36,6 @@ from .base import Module
 
 
 class Energy(Module):
-    name = "energy"
-
     def __init__(
         self,
         t0: float,
@@ -46,7 +44,10 @@ class Energy(Module):
         initial_primary_energy: float,
         initial_capital_per_head: float,
         reserves_ej: float = 1.0e6,
+        region: str = "",
     ) -> None:
+        self.region = region
+        self.name = f"energy_{region or 'world'}"
         self.t0 = float(t0)
         self.initial_primary_energy = float(initial_primary_energy)
         self.reserves_ej = float(reserves_ej)
@@ -84,7 +85,7 @@ class Energy(Module):
     def stocks(self) -> list[Stock]:
         return [
             Stock(
-                "energy_reserves",
+                f"{self.region}energy_reserves",
                 Quantity.ENERGY,
                 self.reserves_ej,
                 kind=StockKind.BOUNDARY,
@@ -94,7 +95,7 @@ class Energy(Module):
                 ),
             ),
             Stock(
-                "dissipated_heat",
+                f"{self.region}dissipated_heat",
                 Quantity.ENERGY,
                 0.0,
                 kind=StockKind.BOUNDARY,
@@ -105,10 +106,10 @@ class Energy(Module):
     def flows(self) -> list[FlowSpec]:
         return [
             FlowSpec(
-                "energy_extraction",
+                f"{self.region}energy_extraction",
                 Quantity.ENERGY,
-                "energy_reserves",
-                "dissipated_heat",
+                f"{self.region}energy_reserves",
+                f"{self.region}dissipated_heat",
                 description=(
                     "Primary energy withdrawn and, within the year, dissipated."
                 ),
@@ -120,7 +121,11 @@ class Energy(Module):
     ) -> dict[str, float]:
         t = view.t
         alpha = params["alpha"]
-        kl = view.stock("capital") ** alpha * view.diag("labour") ** (1.0 - alpha)
+        R = self.region
+        kl = (
+            view.stock(f"{R}capital") ** alpha
+            * view.diag(f"{R}labour") ** (1.0 - alpha)
+        )
         kl_n = kl / self.kl0(alpha)
 
         # Autonomous change in energy required per unit of K-L composite.
@@ -143,7 +148,7 @@ class Energy(Module):
         # saturates, while efficiency knowledge pulls the other way. The
         # observed hump is their crossing, and whether the model puts it in the
         # right decade is a test it can fail.
-        k_head = view.diag("capital_per_head")
+        k_head = view.diag(f"{R}capital_per_head")
         service = self._service_intensity(k_head, params)
         primary = (
             self.initial_primary_energy
@@ -178,15 +183,20 @@ class Energy(Module):
             )
 
         return {
-            "primary_energy_ej": primary,
-            "energy_service_intensity": service,
-            "conversion_efficiency": eff,
-            "useful_exergy_efficiency_pct": 100.0 * eff,
-            "useful_work_ej": primary * eff,
-            "energy_per_kl": service * view.diag("energy_intensity_multiplier"),
+            f"{R}primary_energy_ej": primary,
+            f"{R}energy_service_intensity": service,
+            f"{R}conversion_efficiency": eff,
+            f"{R}useful_exergy_efficiency_pct": 100.0 * eff,
+            f"{R}useful_work_ej": primary * eff,
+            f"{R}energy_per_kl": (
+                service * view.diag("energy_intensity_multiplier")
+            ),
         }
 
     def rates(
         self, view: StateView, params: Mapping[str, Any]
     ) -> dict[str, float]:
-        return {"energy_extraction": view.diag("primary_energy_ej")}
+        R = self.region
+        return {
+            f"{R}energy_extraction": view.diag(f"{R}primary_energy_ej")
+        }

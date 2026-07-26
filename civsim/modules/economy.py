@@ -39,8 +39,6 @@ class InfeasibleAllocation(RuntimeError):
 
 
 class Economy(Module):
-    name = "economy"
-
     def __init__(
         self,
         t0: float,
@@ -49,7 +47,10 @@ class Economy(Module):
         initial_labour: float,
         initial_useful_work: float,
         source_pool: float = 1.0e7,
+        region: str = "",
     ) -> None:
+        self.region = region
+        self.name = f"economy_{region or 'world'}"
         self.t0 = float(t0)
         self.initial_output = float(initial_output)
         self.initial_capital = float(initial_output) * float(capital_output_ratio)
@@ -69,20 +70,20 @@ class Economy(Module):
     def stocks(self) -> list[Stock]:
         return [
             Stock(
-                "capital",
+                f"{self.region}capital",
                 Quantity.CAPITAL,
                 self.initial_capital,
                 description="Productive capital stock, G$2011ppp.",
             ),
             Stock(
-                "capital_source_pool",
+                f"{self.region}capital_source_pool",
                 Quantity.CAPITAL,
                 self.source_pool,
                 kind=StockKind.BOUNDARY,
                 description="Output not yet embodied as capital.",
             ),
             Stock(
-                "scrapped_capital",
+                f"{self.region}scrapped_capital",
                 Quantity.CAPITAL,
                 0.0,
                 kind=StockKind.BOUNDARY,
@@ -93,16 +94,16 @@ class Economy(Module):
     def flows(self) -> list[FlowSpec]:
         return [
             FlowSpec(
-                "investment",
+                f"{self.region}investment",
                 Quantity.CAPITAL,
-                "capital_source_pool",
-                "capital",
+                f"{self.region}capital_source_pool",
+                f"{self.region}capital",
             ),
             FlowSpec(
-                "depreciation",
+                f"{self.region}depreciation",
                 Quantity.CAPITAL,
-                "capital",
-                "scrapped_capital",
+                f"{self.region}capital",
+                f"{self.region}scrapped_capital",
             ),
         ]
 
@@ -114,9 +115,10 @@ class Economy(Module):
         rho = params["rho"]
         beta = params["beta"]
 
-        k = view.stock("capital")
-        lab = view.diag("labour")
-        u = view.diag("useful_work_ej")
+        R = self.region
+        k = view.stock(f"{R}capital")
+        lab = view.diag(f"{R}labour")
+        u = view.diag(f"{R}useful_work_ej")
 
         inner_n = (k**alpha * lab ** (1.0 - alpha)) / self.inner0(alpha)
         u_n = u / self.initial_useful_work
@@ -126,11 +128,11 @@ class Economy(Module):
         # fitted rate forever, whereas a knowledge stock drawn from a finite
         # frontier decelerates on its own. Which of those is right is an open
         # question; only one of them can be wrong in an informative way.
-        tfp = view.diag("tfp_multiplier")
+        tfp = view.diag(f"tfp_multiplier_{R}")
         bracket = beta * inner_n**rho + (1.0 - beta) * u_n**rho
         y = self.initial_output * tfp * bracket ** (1.0 / rho)
 
-        investment = params["saving_rate"] * y
+        investment = params[f"saving_rate_{R or 'world'}"] * y
         rd = params["rd_share"] * y
         consumption = y - investment - rd
         if consumption < 0:
@@ -140,25 +142,28 @@ class Economy(Module):
                 "and consumption for the same output; it is not free."
             )
 
-        pop = view.diag("population_mn") * 1e6
+        pop = view.diag(f"{R}population_mn") * 1e6
         return {
-            "gdp_bn2011ppp": y,
-            "gdp_per_capita": (y * 1e9) / pop,
-            "tfp_index": tfp,
-            "kl_composite_index": inner_n,
-            "useful_work_index": u_n,
-            "investment_bn": investment,
-            "rd_bn": rd,
-            "consumption_bn": consumption,
-            "capital_output_ratio": k / y if y > 0 else float("nan"),
+            f"{R}gdp_bn2011ppp": y,
+            f"{R}gdp_per_capita": (y * 1e9) / pop,
+            f"{R}tfp_index": tfp,
+            f"{R}kl_composite_index": inner_n,
+            f"{R}useful_work_index": u_n,
+            f"{R}investment_bn": investment,
+            f"{R}rd_bn": rd,
+            f"{R}consumption_bn": consumption,
+            f"{R}capital_output_ratio": k / y if y > 0 else float("nan"),
         }
 
     def rates(
         self, view: StateView, params: Mapping[str, Any]
     ) -> dict[str, float]:
+        R = self.region
         return {
-            "investment": view.diag("investment_bn"),
-            "depreciation": params["depreciation_rate"] * view.stock("capital"),
+            f"{R}investment": view.diag(f"{R}investment_bn"),
+            f"{R}depreciation": (
+                params["depreciation_rate"] * view.stock(f"{R}capital")
+            ),
         }
 
     def transactions(
@@ -170,13 +175,14 @@ class Economy(Module):
         exercised by real magnitudes from M0 onward, and so that adding a
         rest-of-world sector at M3 is a registration rather than a redesign.
         """
-        y = view.diag("gdp_bn2011ppp")
+        R = self.region
+        y = view.diag(f"{R}gdp_bn2011ppp")
         wages = params["labour_share"] * y
         tax = params["tax_rate"] * y
-        saving = view.diag("investment_bn")
+        saving = view.diag(f"{R}investment_bn")
         return [
-            ("firms", "households", wages, "wages"),
-            ("firms", "government", tax, "tax"),
-            ("government", "households", tax, "transfers"),
-            ("households", "firms", saving, "investment_financing"),
+            ("firms", "households", wages, f"{R}wages"),
+            ("firms", "government", tax, f"{R}tax"),
+            ("government", "households", tax, f"{R}transfers"),
+            ("households", "firms", saving, f"{R}investment_financing"),
         ]

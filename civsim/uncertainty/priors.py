@@ -126,7 +126,12 @@ M0_PRIOR: dict[str, Dist] = {
     "alpha": TruncNormal(0.35, 0.03, 0.20, 0.50),
     "beta": TruncNormal(0.70, 0.05, 0.40, 0.92),
     "sigma_kl_u": Uniform(0.45, 0.95),  # rho derived; see derive_params
-    "saving_rate": TruncNormal(0.24, 0.02, 0.15, 0.35),
+    # The only regional parameter. Everything else -- the energy service
+    # ladder, the demographic transition, the whole technology layer -- is one
+    # global function that both regions sit on at different points. That is what
+    # lets the cross-section identify curve shapes without doubling the budget.
+    "saving_rate_hi_": TruncNormal(0.22, 0.02, 0.13, 0.32),
+    "saving_rate_lo_": TruncNormal(0.27, 0.03, 0.15, 0.40),
     "depreciation_rate": TruncNormal(0.050, 0.008, 0.025, 0.080),
     "capital_output_ratio": TruncNormal(3.0, 0.3, 2.0, 4.5),
     # --- technology (M1) --------------------------------------------------
@@ -143,22 +148,48 @@ M0_PRIOR: dict[str, Dist] = {
     "rnd_fishing_out": TruncNormal(0.50, 0.20, 0.05, 1.20),
     "knowledge_obsolescence": TruncNormal(0.003, 0.0015, 0.0, 0.010),
     "tfp_elasticity": TruncNormal(1.00, 0.25, 0.30, 1.80),
+    # Absorptive capacity: how much of the global frontier a region captures,
+    # as a function of its development relative to the leader. The floor is what
+    # a region gets with no absorptive capacity at all; theta sets how fast the
+    # rest is earned. Two parameters, spent to remove a qualitative failure --
+    # the lagging region overtaking the leader -- not to improve a fit.
+    "absorption_floor": TruncNormal(0.45, 0.12, 0.15, 0.80),
+    "absorption_theta": TruncNormal(0.60, 0.25, 0.10, 1.50),
     "efficiency_elasticity": TruncNormal(0.50, 0.25, 0.05, 1.20),
-    # Wright learning. 20% cost reduction per doubling is the central estimate
-    # for modular low-carbon generation; the range spans the modular/civil
-    # -engineering divide (solar ~24%, offshore wind ~10%, nuclear negative).
-    "learning_rate": TruncNormal(0.20, 0.06, 0.03, 0.35),
-    "lowcarbon_cost_0": TruncNormal(4.0, 1.0, 1.5, 8.0),
+    # Wright learning, per technology family.
+    #
+    # M2 had one low-carbon technology. Observed world low-carbon share rises,
+    # then sits on a twenty-year plateau (11.3% in 1990 -> 12.6% in 2010), then
+    # resumes. One family with one learning rate and one ceiling cannot produce
+    # that at any parameter value, which is why this was the model's worst
+    # channel. Two families can, and the plateau then emerges as the gap between
+    # one saturating and the other arriving rather than being fitted.
+    #
+    # Dispatchable = hydro + nuclear: civil-engineering learning rates near
+    # zero, competitive from the start, and a hard resource-and-social ceiling.
+    # Modular = wind + solar: steep modular learning, a starting cost far above
+    # parity, and a base so small it takes decades of doublings to matter.
+    "learning_rate_dispatchable": TruncNormal(0.06, 0.03, 0.01, 0.15),
+    "learning_rate_modular": TruncNormal(0.22, 0.05, 0.10, 0.35),
+    "lowcarbon_cost_0_dispatchable": TruncNormal(1.3, 0.3, 0.7, 2.5),
+    "lowcarbon_cost_0_modular": TruncNormal(20.0, 8.0, 5.0, 45.0),
+    "ceiling_dispatchable": TruncNormal(0.18, 0.05, 0.08, 0.35),
+    "ceiling_modular": TruncNormal(0.85, 0.08, 0.50, 0.98),
+    "niche_floor_dispatchable": TruncNormal(0.030, 0.010, 0.010, 0.060),
+    "niche_floor_modular": TruncNormal(0.0020, 0.0015, 0.0002, 0.0080),
+    "deployment_speed_dispatchable": TruncNormal(0.050, 0.020, 0.010, 0.120),
+    "deployment_speed_modular": TruncNormal(0.100, 0.040, 0.020, 0.250),
+    "retirement_rate_dispatchable": TruncNormal(0.020, 0.006, 0.008, 0.040),
+    "retirement_rate_modular": TruncNormal(0.040, 0.010, 0.020, 0.070),
     "fossil_cost": Fixed(1.0),  # numeraire
     "rnd_cost_elasticity": TruncNormal(0.30, 0.15, 0.02, 0.80),
-    "adoption_sharpness": TruncNormal(6.0, 2.0, 1.5, 12.0),
-    "lowcarbon_ceiling": TruncNormal(0.90, 0.05, 0.60, 0.99),
-    # Deployment that happens regardless of cost parity -- hydro, plus the
-    # policy and niche demand that paid for nuclear and solar learning.
-    "niche_share_floor": TruncNormal(0.045, 0.020, 0.005, 0.110),
-    "deployment_speed": TruncNormal(0.050, 0.025, 0.005, 0.150),
-    "lowcarbon_retirement_rate": TruncNormal(0.025, 0.008, 0.010, 0.050),
-    "initial_lowcarbon_share": TruncNormal(0.020, 0.008, 0.005, 0.050),
+    # Softened from 6.0. At sharpness 6 the logistic is effectively a step: a
+    # technology at 1.9x parity gets a 0.5% share, when the historical record
+    # says such a technology is already visibly deploying. The transition is a
+    # gradient, not a threshold.
+    "adoption_sharpness": TruncNormal(2.5, 1.0, 0.8, 6.0),
+    "initial_modular_share": TruncNormal(0.0003, 0.0002, 0.00005, 0.0010),
+    "initial_lowcarbon_share": TruncNormal(0.030, 0.006, 0.015, 0.050),
     # --- energy -----------------------------------------------------------
     # Energy service demand per unit of capital, saturating in development.
     # This is the energy ladder; it is what allows intensity to rise and then
