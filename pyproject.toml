@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "civsim"
+version = "0.1.0"
+description = "Constraint-based civilization dynamics scenario engine"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+civsim = "civsim.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["civsim*"]
+
+[tool.setuptools.package-data]
+"civsim.data" = ["bundled/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
