@@ -81,6 +81,40 @@ SERIES_META: dict[str, SeriesMeta] = {
         grade_by_era=((1959, Grade.A),),
         note="Land-use-change emissions are excluded and are not negligible.",
     ),
+    "lowcarbon_share_pct": SeriesMeta(
+        name="lowcarbon_share_pct",
+        unit="% of primary energy",
+        grade=Grade.B,
+        source="Energy Institute Statistical Review; Smil (2017) for pre-1965",
+        citation=(
+            "Hydro + nuclear + non-biomass renewables as a share of primary "
+            "energy, substitution accounting."
+        ),
+        note=(
+            "B-grade throughout because the substitution convention moves the "
+            "number by several points. Included so the technology module is "
+            "scored on its own output rather than only through emissions."
+        ),
+    ),
+    "working_age_share_pct": SeriesMeta(
+        name="working_age_share_pct",
+        unit="% of total population",
+        grade=Grade.A,
+        source="UN WPP",
+        citation="UN DESA, World Population Prospects 2022, world share aged 15-64.",
+        note=(
+            "Dips to ~57% around 1970 as the post-war birth cohorts are still "
+            "children, then rises to a ~65.5% peak around 2012. Reproducing "
+            "that turning point is a structural test, not a fitting target."
+        ),
+    ),
+    "old_age_share_pct": SeriesMeta(
+        name="old_age_share_pct",
+        unit="% of total population",
+        grade=Grade.A,
+        source="UN WPP",
+        citation="UN DESA, World Population Prospects 2022, world share aged 65+.",
+    ),
     "co2_ppm": SeriesMeta(
         name="co2_ppm",
         unit="ppm",

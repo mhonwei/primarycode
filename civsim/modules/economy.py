@@ -121,26 +121,34 @@ class Economy(Module):
         inner_n = (k**alpha * lab ** (1.0 - alpha)) / self.inner0(alpha)
         u_n = u / self.initial_useful_work
 
-        tfp = math.exp(params["tfp_growth"] * (t - self.t0))
+        # TFP is now the productivity knowledge stock, not exp(g*t). The
+        # difference matters beyond tidiness: a time trend keeps growing at the
+        # fitted rate forever, whereas a knowledge stock drawn from a finite
+        # frontier decelerates on its own. Which of those is right is an open
+        # question; only one of them can be wrong in an informative way.
+        tfp = view.diag("tfp_multiplier")
         bracket = beta * inner_n**rho + (1.0 - beta) * u_n**rho
         y = self.initial_output * tfp * bracket ** (1.0 / rho)
 
-        s = params["saving_rate"]
-        investment = s * y
-        consumption = y - investment
+        investment = params["saving_rate"] * y
+        rd = params["rd_share"] * y
+        consumption = y - investment - rd
         if consumption < 0:
             raise InfeasibleAllocation(
-                f"t={t:g}: saving rate {s:.3f} implies investment {investment:.6g} "
-                f"exceeding output {y:.6g}."
+                f"t={t:g}: investment {investment:.6g} plus R&D {rd:.6g} "
+                f"exceeds output {y:.6g}. R&D competes with capital formation "
+                "and consumption for the same output; it is not free."
             )
 
+        pop = view.diag("population_mn") * 1e6
         return {
             "gdp_bn2011ppp": y,
-            "gdp_per_capita": (y * 1e9) / view.stock("population"),
+            "gdp_per_capita": (y * 1e9) / pop,
             "tfp_index": tfp,
             "kl_composite_index": inner_n,
             "useful_work_index": u_n,
             "investment_bn": investment,
+            "rd_bn": rd,
             "consumption_bn": consumption,
             "capital_output_ratio": k / y if y > 0 else float("nan"),
         }

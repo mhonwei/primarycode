@@ -2,7 +2,8 @@
 
     python -m civsim selftest    conservation and protocol checks, no fitting
     python -m civsim prior       print the prior
-    python -m civsim backtest    the M0 run: fit 1950-1990, score 1990-2020
+    python -m civsim backtest    the M1 run: fit 1950-1990, score 1990-2020
+    python -m civsim stability   re-run across seeds; only robust verdicts
 """
 
 from __future__ import annotations
@@ -67,16 +68,16 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     print(report.verdicts())
 
     OUT.mkdir(exist_ok=True)
-    fig = fan_figure(report, OUT / "m0_backtest_fan.png")
-    report.write_manifest(OUT / "m0_backtest_manifest.json")
-    report.holdout.write_manifest(OUT / "m0_protocol.json")
+    fig = fan_figure(report, OUT / "m1_backtest_fan.png")
+    report.write_manifest(OUT / "m1_backtest_manifest.json")
+    report.holdout.write_manifest(OUT / "m1_protocol.json")
     print(f"\nwrote {fig}")
-    print(f"wrote {OUT / 'm0_backtest_manifest.json'}")
-    print(f"wrote {OUT / 'm0_protocol.json'}")
+    print(f"wrote {OUT / 'm1_backtest_manifest.json'}")
+    print(f"wrote {OUT / 'm1_protocol.json'}")
 
     n = len(report.scores)
     print(
-        f"\nM0 exit criterion: model beat every baseline on "
+        f"\nM1 exit criterion: model beat every baseline on "
         f"{report.n_beaten}/{n} series."
     )
     return 0

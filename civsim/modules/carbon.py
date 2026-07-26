@@ -95,6 +95,19 @@ class Carbon(Module):
                 "fossil_carbon_reserves",
                 "atmosphere_c",
             ),
+            # Land-use change: carbon leaving the biosphere for the atmosphere.
+            # Absent in M0, and its absence was diagnosable from the residuals:
+            # concentration ran 4.5% low while emissions ran 30% high, which no
+            # parameter error can produce. The uptake coefficient had been
+            # calibrated against a carbon budget counting fossil *plus* land
+            # use, while the model was fed fossil only, so roughly an eighth of
+            # the real source term was simply missing.
+            FlowSpec(
+                "land_use_emissions",
+                Quantity.CARBON,
+                "biosphere_c",
+                "atmosphere_c",
+            ),
             FlowSpec("ocean_uptake", Quantity.CARBON, "atmosphere_c", "ocean_c"),
             FlowSpec(
                 "biosphere_uptake", Quantity.CARBON, "atmosphere_c", "biosphere_c"
@@ -104,31 +117,39 @@ class Carbon(Module):
     def diagnostics(
         self, view: StateView, params: Mapping[str, Any]
     ) -> dict[str, float]:
-        import math
-
-        t = view.t
         primary = view.diag("primary_energy_ej")
-        ci = params["carbon_intensity_0"] * math.exp(
-            -params["carbon_intensity_decline"] * (t - self.t0)
-        )
-        emissions_gtc = primary * ci
+
+        # Carbon intensity is now an outcome of the low-carbon supply share,
+        # which is itself an outcome of learning-curve cost and deployment
+        # inertia. M0 had this as a fixed exponential decline, which is why an
+        # emissions plateau was outside its reachable set at every parameter
+        # value: a plateau needs intensity to fall faster than energy grows,
+        # and a constant decline rate cannot accelerate.
+        capacity = view.diag("lowcarbon_capacity")
+        lowcarbon_share = min(capacity / primary, 1.0) if primary > 0 else 0.0
+        ci = params["carbon_intensity_fossil"] * (1.0 - lowcarbon_share)
+        fossil_gtc = primary * ci
+
+        land_use_gtc = params["land_use_emissions_gtc"]
+        total_gtc = fossil_gtc + land_use_gtc
+
         atmos = view.stock("atmosphere_c")
         excess = max(atmos - PREINDUSTRIAL_GTC, 0.0)
-        uptake = (
-            params["uptake_fast"] * emissions_gtc + params["uptake_slow"] * excess
-        )
-        uptake = min(uptake, max(atmos - PREINDUSTRIAL_GTC, 0.0))
+        uptake = params["uptake_fast"] * total_gtc + params["uptake_slow"] * excess
+        uptake = min(uptake, excess)
 
         return {
-            "co2_emissions_gtco2": emissions_gtc * GTCO2_PER_GTC,
-            "emissions_gtc": emissions_gtc,
+            "co2_emissions_gtco2": fossil_gtc * GTCO2_PER_GTC,
+            "emissions_gtc": fossil_gtc,
+            "land_use_emissions_gtc_diag": land_use_gtc,
+            "total_emissions_gtc": total_gtc,
+            "lowcarbon_share": lowcarbon_share,
+            "lowcarbon_share_pct": 100.0 * lowcarbon_share,
             "carbon_intensity_gtc_per_ej": ci,
             "co2_ppm": atmos / GTC_PER_PPM,
             "total_uptake_gtc": uptake,
             "airborne_fraction": (
-                (emissions_gtc - uptake) / emissions_gtc
-                if emissions_gtc > 0
-                else float("nan")
+                (total_gtc - uptake) / total_gtc if total_gtc > 0 else float("nan")
             ),
         }
 
@@ -139,6 +160,7 @@ class Carbon(Module):
         ocean_share = params["ocean_uptake_share"]
         return {
             "emissions": view.diag("emissions_gtc"),
+            "land_use_emissions": view.diag("land_use_emissions_gtc_diag"),
             "ocean_uptake": uptake * ocean_share,
             "biosphere_uptake": uptake * (1.0 - ocean_share),
         }

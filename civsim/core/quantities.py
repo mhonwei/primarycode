@@ -42,6 +42,7 @@ class Quantity(str, Enum):
     ENERGY = "energy"
     CAPITAL = "capital"
     MONEY = "money"
+    KNOWLEDGE = "knowledge"
 
 
 CANONICAL_UNIT: dict[Quantity, str] = {
@@ -50,6 +51,7 @@ CANONICAL_UNIT: dict[Quantity, str] = {
     Quantity.ENERGY: "EJ",
     Quantity.CAPITAL: "G$2011ppp",
     Quantity.MONEY: "G$2011ppp",
+    Quantity.KNOWLEDGE: "index",
 }
 
 BASIS: dict[Quantity, ConservationBasis] = {
@@ -58,6 +60,13 @@ BASIS: dict[Quantity, ConservationBasis] = {
     Quantity.ENERGY: ConservationBasis.PHYSICAL,
     Quantity.CAPITAL: ConservationBasis.ACCOUNTING,
     Quantity.MONEY: ConservationBasis.ACCOUNTING,
+    # Knowledge is conserved by accounting convention, not physics. Ideas are
+    # not a substance. What the convention buys is that discovery must be drawn
+    # from an explicit frontier pool and obsolescence must go somewhere, so
+    # "technology improved because the parameter said so" becomes impossible to
+    # write. The depleting frontier pool then does real work: it is where the
+    # "ideas are getting harder to find" effect lives (Bloom et al. 2020).
+    Quantity.KNOWLEDGE: ConservationBasis.ACCOUNTING,
 }
 
 # Relative tolerance for the per-step conservation check, by quantity.
@@ -70,6 +79,7 @@ DEFAULT_TOLERANCE: dict[Quantity, float] = {
     Quantity.ENERGY: 1e-10,
     Quantity.CAPITAL: 1e-10,
     Quantity.MONEY: 1e-10,
+    Quantity.KNOWLEDGE: 1e-10,
 }
 
 # Conversion constant: 1 ppm atmospheric CO2 == 2.124 GtC (IPCC AR6 Table 5.1).

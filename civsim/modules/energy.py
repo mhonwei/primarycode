@@ -44,6 +44,7 @@ class Energy(Module):
         initial_capital: float,
         initial_labour: float,
         initial_primary_energy: float,
+        initial_capital_per_head: float,
         reserves_ej: float = 1.0e6,
     ) -> None:
         self.t0 = float(t0)
@@ -52,6 +53,24 @@ class Energy(Module):
         self._kl0_cache: dict[float, float] = {}
         self._initial_capital = float(initial_capital)
         self._initial_labour = float(initial_labour)
+        self._initial_capital_per_head = float(initial_capital_per_head)
+
+    def _service_intensity(self, k_head: float, params: Mapping[str, Any]) -> float:
+        """Energy service wanted per unit of capital, saturating in development.
+
+        Normalised to 1.0 at t0 so it multiplies cleanly into the demand
+        expression and carries no units of its own.
+        """
+        half = params["energy_service_half"]
+        theta = params["energy_service_theta"]
+
+        def raw(k: float) -> float:
+            if k <= 0:
+                return 0.0
+            return 1.0 / (1.0 + (half / k) ** theta)
+
+        base = raw(self._initial_capital_per_head)
+        return raw(k_head) / base if base > 0 else 1.0
 
     def kl0(self, alpha: float) -> float:
         """K-L composite at t0, cached per alpha (used for normalisation)."""
@@ -105,18 +124,65 @@ class Energy(Module):
         kl_n = kl / self.kl0(alpha)
 
         # Autonomous change in energy required per unit of K-L composite.
-        eps = params["energy_per_kl_growth"]
-        primary = self.initial_primary_energy * kl_n * math.exp(eps * (t - self.t0))
+        # Energy per unit of K-L composite is now an *outcome* of accumulated
+        # efficiency knowledge, not a fixed exponential in calendar time. This
+        # is the change that makes decoupling reachable at all: M0's intensity
+        # slope was fitted on 1950-1990 and nothing in the model could alter it,
+        # so the post-1990 decoupling was structurally impossible to produce.
+        # Energy demand needs two opposing mechanisms, not one.
+        #
+        # Efficiency knowledge only ever pushes intensity down, monotonically.
+        # But observed energy per unit of K-L composite *rises* through
+        # industrialisation and electrification and only falls later -- the
+        # energy ladder, one of the stylised facts §11.8 requires the model to
+        # reproduce rather than assume. A model with efficiency alone cannot
+        # produce a turning point at any parameter value, which is the same
+        # class of error as M0's fixed exponential, just better disguised.
+        #
+        # So: service demand per unit of capital rises with development and
+        # saturates, while efficiency knowledge pulls the other way. The
+        # observed hump is their crossing, and whether the model puts it in the
+        # right decade is a test it can fail.
+        k_head = view.diag("capital_per_head")
+        service = self._service_intensity(k_head, params)
+        primary = (
+            self.initial_primary_energy
+            * kl_n
+            * service
+            * view.diag("energy_intensity_multiplier")
+        )
 
+        # Conversion efficiency likewise tracks knowledge rather than the
+        # calendar. It is kept separate from end-use intensity because they are
+        # physically distinct -- thermodynamic conversion losses versus how much
+        # service is wanted per unit of capital -- and collapsing them would
+        # hide which of the two any future improvement came from.
+        # The `max(..., 0)` is load-bearing, not defensive clutter. Knowledge can
+        # fall below its t0 index when obsolescence outruns discovery, and
+        # without the clamp the exponent flips sign, efficiency goes *negative*,
+        # useful work goes negative, and the CES bracket returns a complex
+        # number that propagates silently until something compares it to zero.
+        # Conservation checks cannot catch this: nothing is created or
+        # destroyed, the quantity is simply meaningless. Bounds on quantities
+        # that have physical ranges have to be asserted separately.
         eff_inf = params["conv_eff_ceiling"]
         eff_0 = params["conv_eff_initial"]
-        g = params["conv_eff_rate"]
-        eff = eff_inf - (eff_inf - eff_0) * math.exp(-g * (t - self.t0))
+        a_eff = view.diag("knowledge_efficiency_idx")
+        eff = eff_inf - (eff_inf - eff_0) * math.exp(
+            -params["conv_eff_rate"] * max(a_eff - 1.0, 0.0)
+        )
+        if not (0.0 < eff < 1.0):
+            raise ValueError(
+                f"conversion efficiency {eff:.4g} outside (0,1) at t={t:g}; "
+                "a fraction of throughput cannot exceed unity or go negative"
+            )
 
         return {
             "primary_energy_ej": primary,
+            "energy_service_intensity": service,
             "conversion_efficiency": eff,
             "useful_work_ej": primary * eff,
+            "energy_per_kl": service * view.diag("energy_intensity_multiplier"),
         }
 
     def rates(

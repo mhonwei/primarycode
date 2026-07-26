@@ -228,3 +228,51 @@ def test_module_order_does_not_change_results(params, snapshot):
     b = build_engine(params, snapshot, t0=1950.0).run(1950.0, 2000.0)
     for k in a.stocks:
         np.testing.assert_allclose(a.stocks[k], b.stocks[k], rtol=0, atol=0)
+
+
+# --------------------------------------------- bounds the ledger cannot see
+
+
+def test_conversion_efficiency_stays_a_fraction(params, snapshot):
+    """Conservation is necessary and not sufficient.
+
+    Efficiency is a fraction of throughput. When knowledge fell below its t0
+    index the M1 formula produced a *negative* efficiency, hence negative useful
+    work, hence a complex CES bracket that propagated silently until something
+    compared it to zero. Nothing was created or destroyed, so the conservation
+    ledger saw nothing wrong. Quantities with physical ranges need their ranges
+    asserted separately.
+    """
+    eng = build_engine(params, snapshot, t0=1950.0)
+    traj = eng.run(1950.0, 2020.0)
+    eff = traj.diagnostics["conversion_efficiency"]
+    assert np.all(eff > 0.0) and np.all(eff < 1.0)
+    assert np.all(traj.diagnostics["useful_work_ej"] > 0.0)
+    assert np.all(np.isreal(traj.diagnostics["gdp_bn2011ppp"]))
+
+
+def test_low_carbon_share_does_not_collapse(params, snapshot):
+    """The technology module must be able to represent a transition at all.
+
+    The first M1 build deadlocked: learning needs deployment, deployment needs
+    cost parity, cost parity needs learning. The low-carbon share fell from 2.5%
+    to 0.03% over seventy years while retirement ate capacity that was never
+    replaced. Every conservation check passed throughout.
+    """
+    eng = build_engine(params, snapshot, t0=1950.0)
+    traj = eng.run(1950.0, 2020.0)
+    share = traj.diagnostics["lowcarbon_share"]
+    assert share[-1] >= share[0], (
+        f"low-carbon share fell from {share[0]:.4f} to {share[-1]:.4f}; the "
+        "technology module cannot represent any energy transition"
+    )
+
+
+def test_knowledge_is_drawn_from_the_frontier(params, snapshot):
+    """Discovery is a transfer, so the frontier must actually deplete."""
+    eng = build_engine(params, snapshot, t0=1950.0)
+    traj = eng.run(1950.0, 2020.0)
+    pool = traj.stocks["frontier_pool_productivity"]
+    know = traj.stocks["knowledge_productivity"]
+    assert pool[-1] < pool[0], "knowledge grew without drawing on the frontier"
+    assert know[-1] > know[0]

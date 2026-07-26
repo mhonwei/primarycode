@@ -10,7 +10,8 @@ for the feasibility assessment and full design, and
 structure and priors, recorded with whether it was made before or after the
 test window was revealed.
 
-Status: **M0** — single-region world model, 1950–2020 backtest.
+Status: **M1** — single-region world model with an explicit technology layer,
+1950–2020 backtest.
 
 ---
 
@@ -22,58 +23,94 @@ pip install -e ".[dev]"
 python -m civsim selftest     # conservation + protocol checks, no fitting
 python -m civsim backtest     # fit 1950-1990, score 1990-2020, write fan chart
 python -m civsim stability    # re-run across seeds; report only robust verdicts
-pytest                        # 41 tests
+pytest                        # 44 tests
 ```
 
-`backtest` writes `out/m0_backtest_fan.png`, plus a run manifest and a protocol
+`backtest` writes `out/m1_backtest_fan.png`, plus a run manifest and a protocol
 manifest recording the snapshot hash, the freeze, and the reveal.
 
 ---
 
-## What M0 actually found
+## What M1 actually found
 
 Calibrate 1950–1990, freeze, then score 1990–2020 against five naive baselines
 (random walk, drifting random walk, log-linear trend, AR(1) on growth, recent
 trend). CRPS, model and baselines scored like-for-like — every baseline carries
 its own fitted uncertainty, so the comparison is not rigged toward the
-probabilistic model.
+probabilistic model. Verdicts are those whose sign survives four seeds; a
+single-run skill number is not reported as a result.
 
-Verdicts below are those whose sign survives five independent seeds. A
-single-run skill number is **not** reported as a result: GDP skill came out
-+5.7% with 1200 particles and −14.7% with 1500, on six scored points.
+**M1 has robust skill on zero series. M0 had one.** Measured on M0's own five
+series so the comparison is like-for-like:
 
-| series | skill vs best baseline | verdict |
-|---|---|---|
-| world population | +49% (+12% … +72%) | **robust skill** |
-| world GDP | −39% (−93% … +7%) | sign unstable — no demonstrated skill |
-| primary energy | −43% (−97% … −3%) | robust loss |
-| CO₂ emissions | −55% (−132% … −20%) | robust loss |
-| atmospheric CO₂ | −452% (−478% … −404%) | robust loss |
+| series | M0 mean | M1 mean [min, max] | verdict |
+|---|---|---|---|
+| population | **+49.4%** | +12.6% [−57, +63] | robust skill lost, now unstable |
+| GDP | −38.5% | −38.7% [−79, −15] | robust loss, unchanged |
+| primary energy | −43.2% | **−106.7%** [−182, −19] | robust loss, materially worse |
+| CO₂ emissions | −54.6% | −34.1% [−74, +15] | improved, sign unstable |
+| CO₂ concentration | −451.8% | **−81.2%** [−191, +36] | hugely improved, still a net loss |
 
-**One win out of five.** The three robust losses have identified structural
-causes, documented in the changelog:
+Two things went right and two went wrong, and they are separable.
 
-1. **Land-use-change emissions are omitted.** Concentration runs 4.5% low while
-   emissions run 30% high — a combination no parameter error can produce. The
-   uptake coefficient was calibrated against a carbon budget that counts fossil
-   *plus* land use; the model is fed fossil only.
-2. **Energy demand cannot decouple.** Tracks observation to +1.8% at 1990, then
-   diverges monotonically to +24.7% by 2020. Demand is anchored to the capital–
-   labour composite with a fixed drift; the post-1990 world decoupled and the
-   model has no mechanism that can express a regime change in intensity. This
-   is design §2.2 (non-stationarity) appearing on the first run.
-3. **Emissions cannot plateau.** Observed emissions flatten 2015–2020; carbon
-   intensity declines at a fixed exponential rate, so a plateau is outside the
-   model's reachable set at any parameter value.
+**The land-use fix worked, exactly as M0's residuals predicted.** Concentration
+was M0's worst failure by a factor of eight; adding the missing source term
+moved it from −452% to −81%. The diagnosis that too-high emissions with
+too-low concentration means a *missing source* rather than a wrong parameter
+was correct and led straight to the fix. Caveat that must travel with it: the
+frozen run tracks concentration to 0.5% MAPE while running fossil emissions 23%
+high, so the calibration is offsetting a too-steep emissions path with a high
+uptake coefficient. The carbon module is less wrong, not right.
 
-None of these has been fixed, because they were identified *after* the test
-window was revealed. Fixing them now would be tuning against a revealed test
-set. They are the M1/M2 agenda, to be re-frozen and re-scored from scratch.
+**The technology module made energy substantially worse** (−43% → −107%, robust
+across every seed). Energy demand now has two opposing mechanisms — a service
+ladder rising with development, efficiency knowledge pushing the other way —
+where M0 had one exponential, and aggregate primary energy cannot separate them.
+Any pair that fits 1950–1990 is admitted, and they diverge afterwards. Adding a
+mechanism that is not separately observable made the forecast worse. The fix is
+not a better prior but data that identifies the channels, which means sectoral
+intensity series and belongs to M2.
 
-Design §5 predicted energy would beat baselines and GDP would not. Both calls
-were wrong, in opposite directions — §5 reasoned about whether a variable is
-predictable *in principle* and never asked whether this model contains a
-mechanism capable of predicting it. Those are separate claims.
+**The age-structured population lost M0's one robust win** (+49% → +13%). Three
+Erlang-staged compartments are more realistic than one aggregate stock and
+forecast worse.
+
+### By this project's own merge rule, the technology module fails
+
+Design §15.1 says every new subsystem must demonstrate it improved the hold-out
+score before being merged. On backtest evidence, neither the technology module
+nor the age structure does.
+
+**Both are retained anyway, and the reason is on the record rather than
+assumed.** M0's diagnosis was that an emissions plateau lay outside its reachable
+set *at every parameter value*. That is a statement about which futures the model
+can represent, and backtest skill over 1950–2020 cannot measure it — a model can
+track history well while being structurally incapable of the transition every
+forward scenario turns on. The technology layer changes the reachable set, which
+is what a scenario generator needs and what §15.1 was not written to weigh.
+
+The consequence: **the technology module is currently unfalsified, not
+validated.** It has earned a claim to be necessary, not a claim to be right.
+Those must not be conflated.
+
+### Conservation is necessary and not sufficient
+
+Two M1 defects passed every conservation check:
+
+- **Diffusion deadlock.** Learning needs deployment, deployment needs cost
+  parity, cost parity needs learning. The low-carbon share fell from 2.5% to
+  0.03% over seventy years while retirement ate capacity that was never
+  replaced — a technology module that could not represent any transition. Fixed
+  with a niche deployment floor (hydro, plus the policy demand that historically
+  bought nuclear and solar learning above market price). `lowcarbon_share_pct` is
+  now a scored series so the layer is falsifiable on its own terms.
+- **Negative conversion efficiency.** When knowledge fell below its t0 index the
+  exponent flipped sign, useful work went negative, and the CES bracket returned
+  a *complex number* that propagated silently until something compared it to
+  zero. Nothing was created or destroyed, so the ledger saw nothing.
+
+Quantities with physical ranges need their ranges asserted separately from their
+balances. Both now have regression tests.
 
 ---
 
@@ -84,7 +121,7 @@ civsim/
   core/        SFC kernel: stocks, paired flows, conservation ledger,
                sectoral financial ledger, explicit-Euler engine
   data/        A/B/C-graded snapshot registry with content hashing
-  modules/     population -> energy -> economy -> carbon
+  modules/     population -> technology -> energy -> economy -> carbon
   uncertainty/ priors, tempered SMC, correlated-discrepancy likelihood
   backtest/    hold-out gate, baselines, CRPS/PIT scoring, runner
   viz/         fan charts with credible-horizon greying
@@ -147,14 +184,21 @@ Grade drives the observation term of the likelihood and travels with any result.
 
 ---
 
-## Known limitations in M0
+## Known limitations in M1
 
-Beyond the three structural failures above:
-
-- Aggregate population, not cohorts. Crude death rate is monotone decreasing in
-  development, so ageing cannot turn it back up — the model **understates**
-  deaths late in the run, and its population path is an upper envelope. Cohorts
-  are M1.
+- **Energy channels are unidentified.** The service ladder and the efficiency
+  knowledge stock are not separately observable in aggregate primary energy.
+  This is the direct cause of the energy regression and needs sectoral data.
+- **The likelihood assigns every series the same 6% structural scale.** A series
+  the model fits at 27% MAPE then dominates the joint likelihood and contaminates
+  parameters shared with series it could fit well. Most likely single cause of
+  the population regression; should be estimated per series, not assigned.
+- **Six scored points cannot resolve skill.** Rolling-origin scoring across
+  several cutoffs would raise the point count and test non-stationarity directly.
+- Three age compartments, not single-year cohorts. Cohorts need ~40 more
+  parameters against nine 5-yearly aggregate observations; M1 is what happens
+  when mechanism outruns identifiability, and doing it again deliberately would
+  be a decision to produce noise.
 - Single region. No trade, no geopolitics, no heterogeneity.
 - The carbon reduced form ties fast uptake to gross emissions, so it **cannot be
   trusted under net-negative emissions**. Any carbon-removal scenario needs a

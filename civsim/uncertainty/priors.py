@@ -120,52 +120,84 @@ class Uniform(Dist):
         return f"U({self.lo:g}, {self.hi:g})"
 
 
-#: M0 world prior. Keys map onto the parameter names the modules read.
+#: M1 world prior. Keys map onto the parameter names the modules read.
 M0_PRIOR: dict[str, Dist] = {
     # --- production -------------------------------------------------------
     "alpha": TruncNormal(0.35, 0.03, 0.20, 0.50),
     "beta": TruncNormal(0.70, 0.05, 0.40, 0.92),
     "sigma_kl_u": Uniform(0.45, 0.95),  # rho derived; see derive_params
-    "tfp_growth": Normal(0.005, 0.003),
     "saving_rate": TruncNormal(0.24, 0.02, 0.15, 0.35),
     "depreciation_rate": TruncNormal(0.050, 0.008, 0.025, 0.080),
     "capital_output_ratio": TruncNormal(3.0, 0.3, 2.0, 4.5),
+    # --- technology (M1) --------------------------------------------------
+    # Semi-endogenous R&D. `rnd_duplication` < 1 is Jones's duplication
+    # externality, `rnd_shoulders` < 1 diminishing returns to standing on
+    # shoulders, `rnd_fishing_out` > 0 the depleting frontier. Together they
+    # guarantee no scale effect and hence no manufactured singularity.
+    "rd_share": TruncNormal(0.015, 0.004, 0.004, 0.030),
+    "rd_share_productivity": TruncNormal(0.60, 0.08, 0.35, 0.80),
+    "rd_share_efficiency": TruncNormal(0.20, 0.06, 0.05, 0.40),
+    "rnd_productivity": TruncNormal(0.040, 0.020, 0.005, 0.120),
+    "rnd_duplication": TruncNormal(0.50, 0.12, 0.20, 0.85),
+    "rnd_shoulders": TruncNormal(0.30, 0.12, 0.00, 0.70),
+    "rnd_fishing_out": TruncNormal(0.50, 0.20, 0.05, 1.20),
+    "knowledge_obsolescence": TruncNormal(0.003, 0.0015, 0.0, 0.010),
+    "tfp_elasticity": TruncNormal(1.00, 0.25, 0.30, 1.80),
+    "efficiency_elasticity": TruncNormal(0.50, 0.25, 0.05, 1.20),
+    # Wright learning. 20% cost reduction per doubling is the central estimate
+    # for modular low-carbon generation; the range spans the modular/civil
+    # -engineering divide (solar ~24%, offshore wind ~10%, nuclear negative).
+    "learning_rate": TruncNormal(0.20, 0.06, 0.03, 0.35),
+    "lowcarbon_cost_0": TruncNormal(4.0, 1.0, 1.5, 8.0),
+    "fossil_cost": Fixed(1.0),  # numeraire
+    "rnd_cost_elasticity": TruncNormal(0.30, 0.15, 0.02, 0.80),
+    "adoption_sharpness": TruncNormal(6.0, 2.0, 1.5, 12.0),
+    "lowcarbon_ceiling": TruncNormal(0.90, 0.05, 0.60, 0.99),
+    # Deployment that happens regardless of cost parity -- hydro, plus the
+    # policy and niche demand that paid for nuclear and solar learning.
+    "niche_share_floor": TruncNormal(0.045, 0.020, 0.005, 0.110),
+    "deployment_speed": TruncNormal(0.050, 0.025, 0.005, 0.150),
+    "lowcarbon_retirement_rate": TruncNormal(0.025, 0.008, 0.010, 0.050),
+    "initial_lowcarbon_share": TruncNormal(0.020, 0.008, 0.005, 0.050),
     # --- energy -----------------------------------------------------------
-    # Autonomous drift in energy required per unit of K-L composite. Centred on
-    # zero: "no autonomous trend" is the neutral null, and the efficiency and
-    # composition stories that would move it point in both directions.
-    #
-    # Revised at M0 after a prior predictive check on the calibration window
-    # (1950-1990 only) showed the original centre of -0.005 put the *entire*
-    # prior below observed primary energy -- p95 of 237 EJ against 320 EJ
-    # observed in 1990. That centre came from a back-of-envelope that took the
-    # 2020 capital stock from an assumed capital-output ratio instead of from
-    # the model's own accumulation, and was simply wrong. Recentred on zero
-    # rather than on the data-preferred 0.0014, which would be fitting the
-    # centre rather than correcting an error. Logged in docs/model-changelog.md.
-    "energy_per_kl_growth": Normal(0.0, 0.005),
+    # Energy service demand per unit of capital, saturating in development.
+    # This is the energy ladder; it is what allows intensity to rise and then
+    # fall rather than only ever falling.
+    "energy_service_half": TruncNormal(80000.0, 30000.0, 20000.0, 220000.0),
+    "energy_service_theta": TruncNormal(1.00, 0.30, 0.30, 2.20),
     "conv_eff_initial": TruncNormal(0.080, 0.015, 0.040, 0.130),
     "conv_eff_ceiling": TruncNormal(0.200, 0.030, 0.130, 0.320),
-    "conv_eff_rate": TruncNormal(0.012, 0.005, 0.002, 0.030),
-    # --- demography -------------------------------------------------------
-    "cbr_min": TruncNormal(10.0, 2.0, 5.0, 16.0),
-    "cbr_max": TruncNormal(45.0, 3.0, 36.0, 55.0),
-    "cbr_half": TruncNormal(21000.0, 4000.0, 9000.0, 38000.0),
-    "cbr_theta": TruncNormal(1.93, 0.30, 1.00, 3.20),
-    "cdr_min": TruncNormal(7.0, 1.0, 4.5, 10.5),
-    "cdr_max": TruncNormal(26.0, 3.0, 17.0, 36.0),
-    "cdr_half": TruncNormal(13300.0, 2500.0, 6000.0, 24000.0),
-    "cdr_theta": TruncNormal(3.04, 0.50, 1.50, 5.00),
+    "conv_eff_rate": TruncNormal(0.60, 0.30, 0.05, 1.80),
+    # --- demography (M1: three compartments) ------------------------------
+    # Fertility is per 1000 working-age persons, not per 1000 total, because
+    # that is the population actually at risk of giving birth. Centres derived
+    # from world CBR 37 -> 17.5 per 1000 total over 1950-2020, rebased on the
+    # observed working-age share.
+    "fert_max": TruncNormal(75.0, 8.0, 55.0, 100.0),
+    "fert_min": TruncNormal(18.0, 4.0, 8.0, 30.0),
+    "fert_half": TruncNormal(19000.0, 4000.0, 8000.0, 40000.0),
+    "fert_theta": TruncNormal(2.17, 0.40, 1.00, 3.60),
+    "mort_max": TruncNormal(40.0, 6.0, 25.0, 60.0),
+    "mort_min": TruncNormal(6.0, 1.5, 2.5, 11.0),
+    "mort_half": TruncNormal(14800.0, 3000.0, 6000.0, 28000.0),
+    "mort_theta": TruncNormal(2.32, 0.45, 1.00, 4.00),
+    # Compartment mortality relative to the common scale. The old-age ratio is
+    # what makes the aggregate crude death rate rise as the population ages --
+    # the dynamic M0 structurally could not produce.
+    "mort_ratio_youth": TruncNormal(0.50, 0.15, 0.15, 1.00),
+    "mort_ratio_working": TruncNormal(0.40, 0.10, 0.15, 0.75),
+    "mort_ratio_old": TruncNormal(6.00, 2.00, 2.00, 14.00),
     # --- carbon -----------------------------------------------------------
-    "carbon_intensity_0": TruncNormal(0.02073, 0.0012, 0.016, 0.026),
-    "carbon_intensity_decline": TruncNormal(0.0027, 0.0010, 0.0, 0.0070),
+    # Intensity of *fossil* primary energy; the observed decline is now produced
+    # by the low-carbon share rather than assumed as an exponential.
+    "carbon_intensity_fossil": TruncNormal(0.02115, 0.0012, 0.016, 0.027),
+    # Land-use change, absent in M0 and diagnosed from its residuals.
+    "land_use_emissions_gtc": TruncNormal(1.40, 0.40, 0.40, 2.60),
     "uptake_fast": TruncNormal(0.55, 0.05, 0.35, 0.72),
     "uptake_slow": TruncNormal(0.0010, 0.0010, 0.0, 0.0060),
     "ocean_uptake_share": TruncNormal(0.60, 0.05, 0.40, 0.80),
     # --- structural constants --------------------------------------------
-    # Participation cancels out of every normalised ratio in M0; it is kept
-    # explicit so M1 can swap in a working-age share without an interface change.
-    "participation_rate": Fixed(0.45),
+    "participation_rate": Fixed(0.70),
     "labour_share": Fixed(0.58),
     "tax_rate": Fixed(0.15),
 }
