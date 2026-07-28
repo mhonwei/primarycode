@@ -5,6 +5,7 @@
     python -m civsim backtest    the M3 run: fit 1950-1990, score 1990-2020
     python -m civsim stability   re-run across seeds; only robust verdicts
     python -m civsim rolling     rolling-origin evaluation across four cutoffs
+    python -m civsim forward     project to 2100; what is ruled out, and by what
 """
 
 from __future__ import annotations
@@ -168,6 +169,97 @@ def cmd_rolling(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_forward(args: argparse.Namespace) -> int:
+    """Calibrate on all history, project forward, report what is ruled out.
+
+    There is no hold-out here and no skill claim. The hold-out gate exists to
+    keep test data out of a *fit*; this run scores nothing, so it calibrates on
+    everything 1950-2020 and projects. What it reports -- exclusions, variance
+    drivers, path archetypes -- are statements about constraint structure, and
+    those are the §7 outputs that do not need the model to forecast well. Which
+    is fortunate, because it forecasts well on 1 of 13 series.
+    """
+    import numpy as _np
+
+    from .backtest.protocol import Observation
+    from .data.registry import Snapshot as _Snap
+    from .forward import (
+        forward_manifest,
+        path_archetypes,
+        project,
+        variance_drivers,
+        write_manifest,
+    )
+    from .model import OBSERVED_SERIES
+    from .uncertainty.sampler import Posterior, loglik_paths
+    from .uncertainty.smc import run_smc
+
+    snap = _Snap()
+    full = {}
+    for name in OBSERVED_SERIES:
+        w = snap.series(name).window(1950.0, 2020.0)
+        full[name] = Observation(name, w.years, w.values, w.grade_profile())
+
+    print(f"calibrate  1950-2020, all {len(OBSERVED_SERIES)} series, no hold-out")
+    print("           (no skill is claimed by this command; see README)")
+
+    def loglik_fn(paths, times, ok):
+        return loglik_paths(paths, times, full, snap)
+
+    smc = run_smc(
+        loglik_fn, snap, t0=1950.0, t1=2020.0,
+        n_particles=args.draws, seed=args.seed, series=OBSERVED_SERIES,
+        verbose=True,
+    )
+    post = Posterior.from_smc(smc)
+    print(f"posterior  {post.health()}")
+
+    print(f"project    {post.n_particles} posterior draws to {args.to:.0f}")
+    ens = project(post.params, snap, t0=1950.0, t1=float(args.to))
+    print("\n" + ens.exclusion_report())
+
+    targets = [
+        ("co2_ppm", float(args.to), 450.0, False),
+        ("co2_ppm", float(args.to), 550.0, False),
+        ("primary_energy_ej", float(args.to), 1000.0, True),
+        ("lowcarbon_share_pct", float(args.to), 50.0, True),
+        ("population_mn", float(args.to), 10000.0, False),
+    ]
+    print("\nreachability of stated targets (denominator includes exclusions):")
+    for t in targets:
+        print("  " + ens.feasibility_of(t[0], t[1], t[2], t[3])[1])
+
+    key = ["population_mn", "gdp_bn2011ppp", "primary_energy_ej", "co2_ppm"]
+    print("\nvariance drivers at %d (standardised regression, not Sobol):" % args.to)
+    for s in key:
+        drv = variance_drivers(ens, s, float(args.to), top=4)
+        print("  %-22s %s" % (s, ", ".join(f"{n} {b:+.2f}" for n, b in drv)))
+
+    _, sizes = path_archetypes(ens, key, k=4, seed=args.seed)
+    print("\npath archetypes (k=4): sizes %s" % sorted(sizes.values(), reverse=True))
+
+    from .viz.forward import forward_figure
+
+    OUT.mkdir(exist_ok=True)
+    write_manifest(
+        OUT / "m4_forward_manifest.json", forward_manifest(ens, targets, key)
+    )
+    verdicts = {
+        "population_mn": "ROBUST SKILL +34%",
+        "gdp_bn2011ppp": "ROBUST LOSS -141%",
+        "primary_energy_ej": "ROBUST LOSS -247%",
+        "co2_ppm": "ROBUST LOSS -256%",
+        "lowcarbon_share_pct": "ROBUST LOSS -336%",
+        "co2_emissions_gtco2": "ROBUST LOSS -370%",
+    }
+    panels = ["population_mn", "gdp_bn2011ppp", "primary_energy_ej",
+              "lowcarbon_share_pct", "co2_emissions_gtco2", "co2_ppm"]
+    fig = forward_figure(ens, panels, OUT / "m4_forward.png", verdicts)
+    print(f"\nwrote {OUT / 'm4_forward_manifest.json'}")
+    print(f"wrote {fig}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="civsim")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -199,6 +291,12 @@ def main(argv: list[str] | None = None) -> int:
                          "test-window length")
     ro.add_argument("--fixed-test", type=float, default=1995.0)
     ro.set_defaults(fn=cmd_rolling)
+
+    fw = sub.add_parser("forward")
+    fw.add_argument("--draws", type=int, default=800)
+    fw.add_argument("--to", type=float, default=2100.0)
+    fw.add_argument("--seed", type=int, default=20260726)
+    fw.set_defaults(fn=cmd_forward)
 
     args = ap.parse_args(argv)
     return args.fn(args)

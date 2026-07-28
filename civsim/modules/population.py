@@ -49,7 +49,7 @@ import math
 from typing import Any, Mapping
 
 from ..core.quantities import Quantity
-from ..core.stocks import FlowSpec, StateView, Stock, StockKind
+from ..core.stocks import FlowSpec, Limit, StateView, Stock, StockKind
 from .base import Module
 
 #: Compartment widths in years, and the number of Erlang stages each is split
@@ -152,12 +152,13 @@ class Population(Module):
                   description="Population aged 65+.")
         )
         out.append(
-            Stock(f"{self.region}unborn_pool", Quantity.PERSONS, 1e11, kind=StockKind.BOUNDARY,
+            Stock(f"{self.region}unborn_pool", Quantity.PERSONS, 1e15, kind=StockKind.BOUNDARY,
+                  limit=Limit.RESERVOIR,
                   description="Reservoir births are drawn from.")
         )
         out.append(
             Stock(f"{self.region}deceased_pool", Quantity.PERSONS, 0.0, kind=StockKind.BOUNDARY,
-                  description="Cumulative deaths.")
+                  limit=Limit.RESERVOIR, description="Cumulative deaths.")
         )
         return out
 

@@ -10,8 +10,8 @@ for the feasibility assessment and full design, and
 structure and priors, recorded with whether it was made before or after the
 test window was revealed.
 
-Status: **M3** — two-region world model, two low-carbon technology families,
-cross-series error covariance, rolling-origin evaluation.
+Status: **M4** — two-region world model; forward projection, constraint
+exclusion, and sensitivity analysis.
 
 ---
 
@@ -25,7 +25,8 @@ python -m civsim backtest     # fit 1950-1990, score 1990-2020, write fan chart
 python -m civsim stability    # re-run across seeds; report only robust verdicts
 python -m civsim rolling      # four origins; pooled skill + non-stationarity test
 python -m civsim rolling --control   # fixed test window; isolates the confound
-pytest                        # 54 tests
+python -m civsim forward      # project to 2100; what is ruled out, and by what
+pytest                        # 56 tests
 ```
 
 `backtest` writes `out/m3_backtest_fan.png`, plus a run manifest and a protocol
@@ -33,7 +34,64 @@ manifest recording the snapshot hash, the freeze, and the reveal.
 
 ---
 
-## What M3 actually found
+## What M4 actually found
+
+M4 changes direction. Four milestones added mechanism and all cost backtest
+skill. Continuing that would be self-justification — and the more likely reading
+is already in the design: §1.5's per-variable feasibility table predicted exactly
+this. Four rounds of careful mechanism have now confirmed it empirically. **That
+is a result, not a failure**, and it means chasing skill is the wrong objective.
+
+Design §7 says the product is four things: probability fans, **the set of paths
+ruled out by constraint**, **bifurcation and sensitivity maps**, and an audit
+trail. Two had never been built and the model had never been run forward once.
+The point of those two is that **neither needs predictive skill.**
+
+### The exclusion analysis found nothing, and that is informative
+
+700/700 posterior draws reach 2100 with no physical limit binding. But over the
+*prior*, fossil carbon reserves bind in ~11% of draws (median 2055); over the
+posterior, never. So in this model **the binding constraint on emissions is the
+low-carbon transition, not running out of fossil carbon** — a statement that
+does not depend on any forecast being right.
+
+| target at 2100 | reachable (excluded draws in denominator) |
+|---|---|
+| CO₂ ≤ 450 ppm | **0.0%** |
+| CO₂ ≤ 550 ppm | 37.6% |
+| primary energy ≥ 1000 EJ | 73.4% |
+| low-carbon share ≥ 50% | 98.9% |
+| population ≤ 10 bn | 87.6% |
+
+### A kernel conflation this exposed
+
+Sweeping 120 prior draws, 33 hit a floor on an accounting reservoir and 13 hit
+the fossil carbon reserve. Reported together they look like one finding; they are
+opposites, and three quarters of it would have been a statement about an
+arbitrary constant I had sized by guess. `Limit.PHYSICAL` vs `Limit.RESERVOIR`
+now separates them at the type level — exhausting a reserve is counted as data,
+exhausting a reservoir raises a distinct exception that calls itself a bug.
+
+### What the spread actually turns on
+
+| outcome at 2100 | top drivers |
+|---|---|
+| population | `fert_half` +2.06 |
+| GDP | `tfp_elasticity` +0.84, `fert_half` +0.77 |
+| primary energy | `energy_service_theta` +0.77 |
+| CO₂ ppm | `energy_service_theta` +0.78, `learning_rate_modular` −0.54 |
+
+The largest single lever on 2100 concentration is the **shape of the energy
+service ladder**, not the learning rate — demand-side saturation ahead of
+supply-side learning. Not what the technology literature would suggest, and
+exactly the kind of claim to check with a real Sobol decomposition before acting
+on. (These are standardised regression coefficients, which understate
+interaction.) `fert_half` appears in three of four rows: demography is the
+dominant uncertainty even for carbon outcomes.
+
+---
+
+## What M3 found
 
 Robust skill on **1 of 13** series (population, +33.7% across seeds). Everything
 else is a robust loss or sign-unstable.

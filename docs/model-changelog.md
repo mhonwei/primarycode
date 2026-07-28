@@ -520,3 +520,117 @@ last three milestones were a mistake.
 3. **Regional age structure at t0.** Both regions currently start from the world
    age distribution, which is badly wrong for 1950 and is the most likely cause
    of the working-age share being the worst channel (−648%).
+
+---
+
+## M4 — 2026-07-26
+
+M4 changes direction. The first four milestones all added mechanism and all cost
+backtest skill; the pattern is now four data points deep and continuing it would
+be self-justification rather than development.
+
+The more likely reading is already in the design. §1.5's per-variable
+feasibility table predicted this outcome: population predictable, GDP growth
+"几乎不能", the rest in between. Four rounds of increasingly careful mechanism
+have confirmed that table empirically. **That is a result, not a failure** — and
+it means chasing skill is the wrong objective.
+
+Design §7 says the product is four things: probability fans, **the set of paths
+ruled out by constraint**, **bifurcation and sensitivity maps**, and an audit
+trail. Two of them had never been built, and the model had never been run
+forward even once. M4 builds them.
+
+The point of those two outputs is that **neither requires predictive skill.**
+A model with skill on 1 of 13 series cannot say what 2100 looks like. It can
+still say which futures are unreachable without violating conservation, and
+which parameters the spread actually turns on.
+
+### A kernel conflation the exclusion analysis exposed
+
+Sweeping 120 prior draws to 2100, 33 hit a floor on an accounting reservoir and
+13 hit the fossil carbon reserve. Reported together those look like one finding
+about the world. They are opposites: the second is a physical limit, the first
+was an arbitrary 1e7 pool I had sized by guess, and three quarters of the
+"finding" would have been a statement about my own constant.
+
+`Limit.PHYSICAL` vs `Limit.RESERVOIR` now separates them at the type level.
+Exhausting a physical limit raises `ConstraintBinding` and is counted as data.
+Exhausting a reservoir raises `ReservoirUndersized`, is never caught, and is
+labelled a bug in its own message. A test asserts no reservoir binds in a full
+forward run, because if one ever does the exclusion counts are contaminated.
+
+### What the exclusion analysis actually found
+
+**Nothing is excluded.** 700/700 posterior draws reach 2100 with no physical
+limit binding. Reported plainly because it is the honest result, and because it
+is more informative than it first looks:
+
+- Over the *prior*, fossil carbon reserves bind in ~11% of draws (median 2055).
+  Over the *posterior*, never. Calibration on 1950–2020 concentrates the
+  parameters in a region where depletion does not bite this century.
+- So in this model **the binding constraint on emissions is the low-carbon
+  transition, not running out of fossil carbon.** That is a genuine and
+  non-obvious statement of the kind §7 promised, and it does not depend on any
+  forecast being right.
+
+Target reachability, with excluded draws in the denominator:
+
+| target at 2100 | reachable |
+|---|---|
+| CO₂ ≤ 450 ppm | **0.0%** |
+| CO₂ ≤ 550 ppm | 37.6% |
+| primary energy ≥ 1000 EJ | 73.4% |
+| low-carbon share ≥ 50% | 98.9% |
+| population ≤ 10 bn | 87.6% |
+
+### Sensitivity: what the spread actually turns on
+
+Standardised regression, not Sobol — linear-additive and it will understate the
+interactions the technology module is full of. Used because it costs one
+existing ensemble instead of a dedicated sample of tens of thousands, and
+because "which knobs matter at all" survives the approximation. Anything that
+looks decisive here needs a proper Sobol index before it is believed.
+
+| outcome at 2100 | top drivers |
+|---|---|
+| population | `fert_half` +2.06, `depreciation_rate` +1.06 |
+| GDP | `tfp_elasticity` +0.84, `fert_half` +0.77 |
+| primary energy | `energy_service_theta` +0.77, `fert_half` +0.62 |
+| CO₂ ppm | `energy_service_theta` +0.78, `learning_rate_modular` −0.54 |
+
+The result worth flagging: the largest single lever on 2100 concentration is the
+**shape of the energy service ladder**, not the learning rate — demand-side
+saturation ahead of supply-side learning. That is not what the technology
+literature would lead you to expect, and it is exactly the sort of claim that
+should be checked with a real Sobol decomposition before anyone acts on it.
+
+Note also that `fert_half` appears in three of the four rows. Demography is the
+model's dominant uncertainty even for energy and carbon outcomes — consistent
+with it being the one channel with robust skill, and a caution that the others
+inherit their spread from it.
+
+### Path archetypes
+
+k-means on standardised log-trajectories concatenated across population, GDP,
+energy and concentration, so an archetype is a whole-system story rather than
+one variable's shape. Four clusters, sizes 248/191/145/116. A summarisation
+device, not an inference.
+
+### Standing position
+
+Robust backtest skill: **1 of 13** series. Unchanged, and not the objective any
+more. The forward chart states that verdict on every panel, so a projection of a
+channel that loses to trend extrapolation cannot be read as a forecast without
+also reading the caveat.
+
+### For M5
+
+1. **Proper Sobol indices** for the drivers above. The service-ladder result is
+   too surprising to rest on a linear approximation.
+2. **Scenario inversion** — instead of sweeping parameters and seeing what comes
+   out, ask what would have to be true for a stated target and test whether that
+   combination is internally consistent. That is the question policy actually
+   asks, and the constraint machinery is now in place to answer it.
+3. The exclusion analysis found nothing because the posterior is narrow. It
+   becomes informative when the model is asked about futures further from the
+   calibrated region — which is what (2) does.

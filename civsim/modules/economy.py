@@ -30,7 +30,7 @@ import math
 from typing import Any, Mapping
 
 from ..core.quantities import Quantity
-from ..core.stocks import FlowSpec, StateView, Stock, StockKind
+from ..core.stocks import FlowSpec, Limit, StateView, Stock, StockKind
 from .base import Module
 
 
@@ -46,7 +46,7 @@ class Economy(Module):
         capital_output_ratio: float,
         initial_labour: float,
         initial_useful_work: float,
-        source_pool: float = 1.0e7,
+        source_pool: float = 1.0e12,
         region: str = "",
     ) -> None:
         self.region = region
@@ -80,6 +80,7 @@ class Economy(Module):
                 Quantity.CAPITAL,
                 self.source_pool,
                 kind=StockKind.BOUNDARY,
+                limit=Limit.RESERVOIR,
                 description="Output not yet embodied as capital.",
             ),
             Stock(
@@ -87,6 +88,7 @@ class Economy(Module):
                 Quantity.CAPITAL,
                 0.0,
                 kind=StockKind.BOUNDARY,
+                limit=Limit.RESERVOIR,
                 description="Cumulative depreciation.",
             ),
         ]

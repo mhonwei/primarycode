@@ -31,7 +31,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from ..core.quantities import GTC_PER_PPM, GTCO2_PER_GTC, Quantity
-from ..core.stocks import FlowSpec, StateView, Stock, StockKind
+from ..core.stocks import FlowSpec, Limit, StateView, Stock, StockKind
 from .base import Module
 
 #: Preindustrial atmospheric CO2, 278 ppm (IPCC AR6).
@@ -76,6 +76,7 @@ class Carbon(Module):
                 Quantity.CARBON,
                 self.ocean_gtc,
                 kind=StockKind.BOUNDARY,
+                limit=Limit.RESERVOIR,
                 description="Ocean carbon, GtC.",
             ),
             Stock(
@@ -83,6 +84,7 @@ class Carbon(Module):
                 Quantity.CARBON,
                 self.biosphere_gtc,
                 kind=StockKind.BOUNDARY,
+                limit=Limit.RESERVOIR,
                 description="Land biosphere and soil carbon, GtC.",
             ),
         ]

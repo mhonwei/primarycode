@@ -72,7 +72,7 @@ import math
 from typing import Any, Mapping
 
 from ..core.quantities import Quantity
-from ..core.stocks import FlowSpec, StateView, Stock, StockKind
+from ..core.stocks import FlowSpec, Limit, StateView, Stock, StockKind
 from .base import Module
 
 DOMAINS = ("productivity", "efficiency", "lowcarbon")
@@ -118,6 +118,7 @@ class Technology(Module):
                     Quantity.KNOWLEDGE,
                     self.frontier_pool,
                     kind=StockKind.BOUNDARY,
+                    limit=Limit.RESERVOIR,
                     description=(
                         f"Undiscovered {d} knowledge. Depletion is the "
                         "fishing-out effect, not bookkeeping."
@@ -130,6 +131,7 @@ class Technology(Module):
                     Quantity.KNOWLEDGE,
                     0.0,
                     kind=StockKind.BOUNDARY,
+                    limit=Limit.RESERVOIR,
                     description=f"Retired {d} knowledge.",
                 )
             )
@@ -174,6 +176,7 @@ class Technology(Module):
                     Quantity.ENERGY,
                     0.0,
                     kind=StockKind.BOUNDARY,
+                    limit=Limit.RESERVOIR,
                     description=f"Retired {fam} capacity, EJ/yr equivalent.",
                 )
             )
@@ -181,8 +184,9 @@ class Technology(Module):
             Stock(
                 "deployment_pool",
                 Quantity.ENERGY,
-                1.0e7,
+                1.0e12,
                 kind=StockKind.BOUNDARY,
+                limit=Limit.RESERVOIR,
                 description="Source pool for deployment accounting.",
             )
         )

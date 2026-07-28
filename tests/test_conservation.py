@@ -10,10 +10,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from civsim.core.engine import Engine, NegativeStockError
+from civsim.core.engine import (
+    ConstraintBinding,
+    Engine,
+    ReservoirUndersized,
+)
 from civsim.core.ledger import ConservationViolation
 from civsim.core.quantities import Quantity
-from civsim.core.stocks import FlowSpec, Stock, StockKind
+from civsim.core.stocks import FlowSpec, Limit, Stock, StockKind
 from civsim.data.registry import Snapshot
 from civsim.model import build_engine
 from civsim.modules.base import Module
@@ -175,10 +179,61 @@ class _Overdraw(Module):
         return {"drain": 5.0}
 
 
-def test_drawing_more_than_exists_raises():
+def test_exhausting_a_physical_limit_is_reported_as_exclusion():
+    """Running out of a real reserve is information, not a bug.
+
+    The exclusion analysis counts these: a trajectory that empties the fossil
+    carbon reserve is a future the model rules out, and the binding stock names
+    the reason.
+    """
     eng = Engine([_Overdraw()], params={})
-    with pytest.raises(NegativeStockError, match="would go negative"):
+    with pytest.raises(ConstraintBinding, match="physical limit reached") as e:
         eng.step(0.0)
+    assert e.value.stock == "small"
+    assert "not a failure" in str(e.value)
+
+
+class _UndersizedReservoir(Module):
+    name = "undersized"
+
+    def stocks(self):
+        return [
+            Stock(
+                "book", Quantity.CARBON, 1.0,
+                kind=StockKind.BOUNDARY, limit=Limit.RESERVOIR,
+            ),
+            Stock("real", Quantity.CARBON, 0.0, kind=StockKind.BOUNDARY),
+        ]
+
+    def flows(self):
+        return [FlowSpec("draw", Quantity.CARBON, "book", "real")]
+
+    def rates(self, view, params):
+        return {"draw": 5.0}
+
+
+def test_an_undersized_reservoir_is_a_bug_not_a_finding():
+    """The distinction the exclusion analysis depends on.
+
+    Sweeping 120 forward runs, 33 hit a floor on an accounting reservoir I had
+    sized by guess and 13 hit the fossil carbon reserve. Reported together they
+    look like one finding about the world. They are opposites, and only the
+    second is one.
+    """
+    eng = Engine([_UndersizedReservoir()], params={})
+    with pytest.raises(ReservoirUndersized, match="sized too small"):
+        eng.step(0.0)
+
+
+def test_no_accounting_reservoir_binds_in_a_full_forward_run(snapshot):
+    """If a bookkeeping pool ever binds, the exclusion counts are contaminated."""
+    for p in sample_prior(np.random.default_rng(21), 8):
+        try:
+            build_engine(p, snapshot, t0=1950.0).run(1950.0, 2100.0)
+        except ReservoirUndersized:  # pragma: no cover - the thing being ruled out
+            raise
+        except ConstraintBinding:
+            pass  # a real limit binding is the point
 
 
 class _SelfFlow(Module):

@@ -34,6 +34,27 @@ class StockKind(str, Enum):
     BOUNDARY = "boundary"
 
 
+class Limit(str, Enum):
+    """What it *means* for a stock to run out.
+
+    The kernel conflated two things until M4 and the exclusion analysis made the
+    conflation visible: sweeping 120 forward runs, 33 hit a floor on an
+    accounting reservoir (an arbitrary 1e7 pool I had sized by guess) and 13 hit
+    the fossil carbon reserve. Reported together they look like one finding.
+    They are opposites.
+
+      PHYSICAL      A real limit on a real quantity. Hitting it is *information*:
+                    this future is excluded, and the binding stock says why.
+      RESERVOIR     A bookkeeping device that exists only so flows have a source
+                    and conservation is checkable. Hitting it is a *bug* -- the
+                    reservoir was sized too small -- and must never be reported
+                    as a constraint on the world.
+    """
+
+    PHYSICAL = "physical"
+    RESERVOIR = "reservoir"
+
+
 @dataclass
 class Stock:
     """A quantity of something, held somewhere.
@@ -49,6 +70,8 @@ class Stock:
     description: str = ""
     #: If False, the engine raises when a flow would drive this stock negative.
     allow_negative: bool = False
+    #: Whether exhaustion is a fact about the world or a fact about the model.
+    limit: Limit = Limit.PHYSICAL
 
     value: float = field(init=False)
 

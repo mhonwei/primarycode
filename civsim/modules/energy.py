@@ -31,7 +31,7 @@ import math
 from typing import Any, Mapping
 
 from ..core.quantities import Quantity
-from ..core.stocks import FlowSpec, StateView, Stock, StockKind
+from ..core.stocks import FlowSpec, Limit, StateView, Stock, StockKind
 from .base import Module
 
 
@@ -99,6 +99,7 @@ class Energy(Module):
                 Quantity.ENERGY,
                 0.0,
                 kind=StockKind.BOUNDARY,
+                limit=Limit.RESERVOIR,
                 description="Cumulative energy degraded to low-grade heat, EJ.",
             ),
         ]

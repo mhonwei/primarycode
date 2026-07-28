@@ -36,11 +36,42 @@ from ..modules.base import Module
 from .financial import FinancialLedger, Sector
 from .ledger import ConservationLedger
 from .quantities import Quantity
-from .stocks import FlowSpec, StateView, Stock
+from .stocks import FlowSpec, Limit, StateView, Stock
 
 
-class NegativeStockError(RuntimeError):
-    """A flow would drive a stock below zero."""
+class ConstraintBinding(RuntimeError):
+    """A physical limit was reached: this trajectory is excluded.
+
+    Not an error in the model. The whole point of tracking reserves explicitly
+    is that running out is a statement about which futures are reachable, and
+    the exclusion analysis in civsim/forward.py treats these as data.
+    """
+
+    def __init__(self, stock: str, t: float, available: float, demanded: float):
+        self.stock, self.t = stock, t
+        self.available, self.demanded = available, demanded
+        super().__init__(
+            f"physical limit reached at t={t:g}: {stock!r} holds "
+            f"{available:.6g} but {demanded:.6g} was drawn. This trajectory is "
+            "excluded, which is a result and not a failure."
+        )
+
+
+class ReservoirUndersized(RuntimeError):
+    """An accounting reservoir ran dry -- a modelling bug, not a finding."""
+
+    def __init__(self, stock: str, t: float, available: float, demanded: float):
+        super().__init__(
+            f"accounting reservoir {stock!r} ran dry at t={t:g} "
+            f"({available:.6g} available, {demanded:.6g} drawn). This is a "
+            "bookkeeping device, not a limit on the world: it was sized too "
+            "small. Raising it changes nothing physical. Do NOT report this as "
+            "a constraint."
+        )
+
+
+#: Retained for callers that only care that integration failed.
+NegativeStockError = ConstraintBinding
 
 
 @dataclass
@@ -188,12 +219,9 @@ class Engine:
             st = self._stocks[name]
             new = st.value + d
             if new < 0 and not st.allow_negative:
-                raise NegativeStockError(
-                    f"stock {name!r} would go negative at t={t:g}: "
-                    f"{st.value:.6g} + ({d:.6g}) = {new:.6g}. The flows drawing "
-                    "on it exceed what is there -- that is a real constraint "
-                    "being violated, not a numerical artefact."
-                )
+                if st.limit is Limit.RESERVOIR:
+                    raise ReservoirUndersized(name, t, st.value, -d)
+                raise ConstraintBinding(name, t, st.value, -d)
             st.value = new
 
     def step(self, t: float) -> tuple[dict[str, float], dict[str, float]]:
