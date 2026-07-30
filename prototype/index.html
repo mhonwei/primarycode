@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HSCI · 人类生存危机指数 — Phase 0 原型</title>
+<style>
+  :root {
+    --surface: #0e1420;
+    --panel: #141c2c;
+    --ink: #e6ebf4;
+    --ink-2: #9aa7bd;
+    --ink-3: #5f6c84;
+    --line: #24304a;
+    --accent: #ff5a4d;
+    --band-g: #86d29c; --band-y: #cfa32e; --band-o: #c06a2c;
+    --band-r: #a33d38; --band-k: #2a1626;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--surface); color: var(--ink);
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 24px 80px; }
+  header h1 { font-size: 1.7rem; font-weight: 700; letter-spacing: .02em; }
+  header .sub { color: var(--ink-2); margin-top: 6px; font-size: .95rem; }
+  .disclaimer {
+    margin-top: 14px; font-size: .8rem; color: var(--ink-3);
+    border-left: 3px solid var(--line); padding-left: 10px;
+  }
+  /* ---- 指数卡 ---- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 30px 0 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .tile .label { font-size: .8rem; color: var(--ink-2); }
+  .tile .value { font-size: 2.3rem; font-weight: 700; margin: 2px 0; font-variant-numeric: tabular-nums; }
+  .tile .band { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--ink-2); }
+  .tile .band .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .tile .note { font-size: .75rem; color: var(--ink-3); margin-top: 8px; }
+  section { margin-top: 52px; }
+  section > h2 { font-size: 1.15rem; margin-bottom: 4px; }
+  section > .desc { color: var(--ink-2); font-size: .88rem; margin-bottom: 18px; }
+  /* ---- 热力矩阵 ---- */
+  .matrix-scroll { overflow-x: auto; }
+  .matrix { display: grid; gap: 3px; min-width: 760px; }
+  .mcell {
+    position: relative; border-radius: 4px; height: 46px;
+    display: flex; align-items: center; justify-content: center; cursor: default;
+  }
+  .mcell.head { background: none; color: var(--ink-2); font-size: .78rem; height: auto; padding: 4px 2px; text-align: center; line-height: 1.3; }
+  .mcell.rowhead { background: none; color: var(--ink-2); font-size: .78rem; justify-content: flex-end; padding-right: 10px; text-align: right; line-height: 1.25; }
+  .mcell.na {
+    background: repeating-linear-gradient(45deg, transparent 0 6px, var(--line) 6px 7px);
+    opacity: .5;
+  }
+  .mcell.data:hover { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 2; }
+  .mcell.u3::after {
+    content: ""; position: absolute; inset: 0; border-radius: 4px;
+    background: repeating-linear-gradient(45deg, transparent 0 5px, rgba(10,12,18,.4) 5px 7px);
+  }
+  .mcell.black { border: 1.5px solid var(--accent); }
+  /* ---- 图例 ---- */
+  .legend { display: flex; flex-wrap: wrap; gap: 18px 26px; margin-top: 16px; font-size: .78rem; color: var(--ink-2); align-items: center; }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; position: relative; }
+  /* ---- 时间轴 ---- */
+  .timeline-scroll { overflow-x: auto; }
+  svg text { font-family: inherit; }
+  /* ---- 提示框 ---- */
+  #tip {
+    position: fixed; display: none; max-width: 300px; z-index: 10;
+    background: #1c2536; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: .8rem; pointer-events: none;
+    box-shadow: 0 6px 24px rgba(0,0,0,.5);
+  }
+  #tip .t-title { font-weight: 700; margin-bottom: 4px; }
+  #tip .t-meta { color: var(--ink-2); }
+  #tip .t-note { color: var(--ink-2); margin-top: 4px; border-top: 1px solid var(--line); padding-top: 4px; }
+  /* ---- 数据表 ---- */
+  details { margin-top: 20px; font-size: .82rem; }
+  details summary { cursor: pointer; color: var(--ink-2); }
+  details table { border-collapse: collapse; margin-top: 12px; width: 100%; }
+  details th, details td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  details th { color: var(--ink); }
+  footer { margin-top: 60px; font-size: .78rem; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>人类生存危机指数 HSCI</h1>
+    <div class="sub">深时视角下的当下 · Phase 0 概念验证原型（V3 热力矩阵 + V2 深时时间轴）</div>
+    <div class="disclaimer">HSCI 是风险沟通与教育工具，表达文献与数据支持的风险量级与方向，不是对未来的预测。本原型使用<strong>演示占位数据</strong>，指数值由规范 02 的公式实时计算。</div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section>
+    <h2>V3 · 时间 × 危机热力矩阵</h2>
+    <div class="desc">每格 = 该危机域在该时间层的风险分 R = 100 · P̂ · (I/5)<sup>0.7</sup>。斜线空格为无效格（该组合无科学内容），纹理覆盖表示证据等级为专家判断。悬停查看 P / I / U 与说明。</div>
+    <div class="matrix-scroll"><div class="matrix" id="matrix"></div></div>
+    <div class="legend" id="legend"></div>
+    <details>
+      <summary>查看数据表（46 个有效格）</summary>
+      <table id="dataTable"></table>
+    </details>
+  </section>
+
+  <section>
+    <h2>V2 · 深时时间轴</h2>
+    <div class="desc">对数尺度，从 100 亿年前到 100 亿年后。灭绝不是假设——左侧的历史锚点证明它几乎发生过；右侧是各危机的预测节点。悬停查看详情。</div>
+    <div class="timeline-scroll"><svg id="timeline" viewBox="0 0 1000 250" width="100%" style="min-width:760px"></svg></div>
+    <div class="desc" style="margin-top:10px">⚖ 尺度提醒：在线性尺度下，人类文明的 1 万年与本轴全长 200 亿年之比约为 1 : 200 万——若把本轴画成 20 米长，文明只占 0.01 毫米。</div>
+  </section>
+
+  <footer>
+    HSCI Phase 0 原型 · 方法学见 <code>docs/02-指数计算与指标体系规范.md</code> · 数据管线见 <code>docs/03-数据管线设计.md</code> · 演示数据非实测值
+  </footer>
+</div>
+<div id="tip"></div>
+
+<script>
+/* ================= 数据（演示占位值，结构遵循快照 schema v0.1） ================= */
+const DOMAINS = [
+  { id:"C1", name:"气候系统" },   { id:"C2", name:"生物多样性" },
+  { id:"C3", name:"核战争" },     { id:"C4", name:"资源枯竭" },
+  { id:"C5", name:"社会系统" },   { id:"C6", name:"地质活动" },
+  { id:"C7", name:"太空威胁" },   { id:"C8", name:"环境污染" },
+  { id:"C9", name:"技术风险" },   { id:"C10", name:"天文命运" },
+];
+const HORIZONS = [
+  { id:"T0", name:"当下–30年" }, { id:"T1", name:"50年" }, { id:"T2", name:"100年" },
+  { id:"T3", name:"千年" }, { id:"T4", name:"万年" }, { id:"T5", name:"十万年" }, { id:"T6", name:"百万年+" },
+];
+// 每格 [P, I, U, note]；null = 无效格（掩码见规范02 §3）
+const CELLS = {
+  C1: [[0.9,2,1,"升温突破1.5°C几乎锁定"],[0.85,3,2,"升温路径与冰盖响应"],[0.7,3,2,"海平面多米级上升风险"],[0.4,3,2,"冰盖不可逆消融"],[0.2,2,2,"碳循环长期惯性"],null,null],
+  C2: [[0.8,2,2,"传粉者与种群持续下降"],[0.7,2,2,"珊瑚礁功能性灭绝风险"],[0.6,3,2,"生态系统级联失效"],[0.3,3,3,"第六次大灭绝的长尾"],null,null,null],
+  C3: [[0.05,4,3,"末日时钟89秒；误判风险"],[0.08,4,3,"核扩散趋势"],[0.12,4,3,"世纪累积概率"],[0.3,4,3,"千年尺度累积风险"],null,null,null],
+  C4: [[0.5,2,2,"水压力与耕地退化"],[0.5,2,2,"磷矿与关键矿产"],[0.5,3,3,"资源冲突情景"],[0.2,2,3,"循环经济可否闭环"],null,null,null],
+  C5: [[0.4,2,2,"大流行病与社会信任"],[0.5,3,3,"人口结构剧变"],[0.4,3,3,"复合型社会危机"],[0.3,3,3,"文明延续性（罗马/玛雅案例）"],null,null,null],
+  C6: [[0.002,3,2,"VEI-8 世纪概率约0.6%"],[0.003,3,2,"统计周期推算"],[0.006,3,2,"黄石/多巴级事件"],[0.06,4,2,"千年累积概率"],[0.45,4,2,"万年窗口显著"],[0.99,4,2,"十万年内几乎必然"],[1,4,2,"多巴事件曾将人类削至数千人"]],
+  C7: [[0.1,2,2,"卡灵顿级风暴十年概率1–12%"],[0.15,2,2,"电网时代首次大考"],[0.3,3,2,"世纪内太阳风暴几乎必遇"],[1e-4,5,1,"千米级NEO千年累积"],[1e-3,5,1,"万年累积概率"],[0.01,5,1,"十万年累积"],[0.1,5,1,"K-Pg级撞击的深时概率"]],
+  C8: [[0.7,1,3,"PFAS与塑料慢性负荷"],[0.7,2,3,"化学负荷代际累积"],[0.6,2,3,"生育能力影响争议"],[0.2,2,3,"长寿命污染物遗产"],null,null,null],
+  C9: [[0.1,4,3,"AI能力跃迁期（Ord: 1/10）"],[0.12,5,3,"失控AI/工程病原体"],[0.1,5,3,"存在风险文献核心议题"],[0.12,5,3,"技术成熟期长尾"],null,null,null],
+  C10:[null,null,null,null,null,[3e-8,5,1,"太阳亮度缓增，十万年内无虞"],[1,5,1,"约10亿年后海洋蒸发；50亿年后红巨星"]],
+};
+// 冷启动权重（规范02 §4.3）与时间层权重
+const W = { C1:.14, C2:.08, C3:.12, C4:.06, C5:.10, C6:.04, C7:.03, C8:.05, C9:.35, C10:.03 };
+const LAMBDA = [1.0, .6, .35, .15, .07, .03, .01];
+
+/* ================= 指数计算（规范02 §2、§4） ================= */
+const GAMMA = 0.7;
+const phat = P => Math.min(1, Math.max(0, (Math.log10(P) + 8) / 8));
+const cellR = (P, I) => 100 * phat(P) * Math.pow(I / 5, GAMMA);
+
+const BANDS = [
+  { max:25,  key:"g", css:"--band-g", name:"绿 · 可控" },
+  { max:50,  key:"y", css:"--band-y", name:"黄 · 关注" },
+  { max:70,  key:"o", css:"--band-o", name:"橙 · 警告" },
+  { max:90,  key:"r", css:"--band-r", name:"红 · 危机" },
+  { max:101, key:"k", css:"--band-k", name:"黑 · 生存威胁" },
+];
+const bandOf = r => BANDS.find(b => r < b.max);
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function domainScores(id) {
+  let wsum = 0, acc = 0, peak = 0;
+  CELLS[id].forEach((c, t) => {
+    if (!c) return;
+    const r = cellR(c[0], c[1]);
+    acc += LAMBDA[t] * r; wsum += LAMBDA[t];
+    peak = Math.max(peak, r);
+  });
+  return { A: acc / wsum, E: peak };
+}
+let HSCI_A = 0, HSCI_E = 0;
+DOMAINS.forEach(d => { const s = domainScores(d.id); HSCI_A += W[d.id] * s.A; HSCI_E += W[d.id] * s.E; });
+
+/* ================= 指数卡 ================= */
+function tile(label, value, note) {
+  const b = bandOf(value);
+  return `<div class="tile"><div class="label">${label}</div>
+    <div class="value">${value.toFixed(1)}</div>
+    <div class="band"><span class="dot" style="background:${cssVar(b.css)};${b.key==='k'?'border:1px solid var(--accent)':''}"></span>${b.name}</div>
+    <div class="note">${note}</div></div>`;
+}
+document.getElementById("tiles").innerHTML =
+  tile("HSCI-A 行动指数（时间贴现）", HSCI_A, "回答「这一代人该多着急」，与末日时钟对话") +
+  tile("HSCI-E 存在指数（无贴现）", HSCI_E, "回答「人类这个物种处境如何」，各时间层取峰值") +
+  `<div class="tile"><div class="label">末日时钟（外部校准信号）</div>
+    <div class="value">89<span style="font-size:1rem;color:var(--ink-2)"> 秒</span></div>
+    <div class="band">距午夜 · 2025年，历史最近</div>
+    <div class="note">作为 C3 / C9 域的校准锚点之一（原子科学家公报）</div></div>`;
+
+/* ================= 热力矩阵 ================= */
+const matrix = document.getElementById("matrix");
+matrix.style.gridTemplateColumns = `86px repeat(${DOMAINS.length}, 1fr)`;
+let html = `<div class="mcell head"></div>` + DOMAINS.map(d => `<div class="mcell head">${d.id}<br>${d.name}</div>`).join("");
+HORIZONS.forEach((h, t) => {
+  html += `<div class="mcell rowhead">${h.id}<br>${h.name}</div>`;
+  DOMAINS.forEach(d => {
+    const c = CELLS[d.id][t];
+    if (!c) { html += `<div class="mcell na" role="img" aria-label="${d.name}×${h.name}：无效格"></div>`; return; }
+    const [P, I, U, note] = c;
+    const r = cellR(P, I), b = bandOf(r);
+    let bg = cssVar(b.css);
+    const cls = ["mcell", "data"];
+    if (U >= 2) cls.push("u2");
+    if (U === 3) cls.push("u3");
+    if (b.key === "k") cls.push("black");
+    const style = `background:${bg};${U>=2 ? "filter:saturate(.7);" : ""}`;
+    html += `<div class="${cls.join(" ")}" style="${style}" tabindex="0" role="img"
+      aria-label="${d.name}×${h.name}：风险${r.toFixed(0)}分，${b.name}"
+      data-tip-title="${d.id} ${d.name} × ${h.name}"
+      data-tip-meta="R = ${r.toFixed(1)}（${b.name}）｜P ≈ ${P < 0.001 ? P.toExponential(0) : P}｜烈度 I = ${I}/5｜证据：${["实测数据","模型区间","专家判断"][U-1]}"
+      data-tip-note="${note}"></div>`;
+  });
+});
+matrix.innerHTML = html;
+
+/* 图例 */
+document.getElementById("legend").innerHTML =
+  BANDS.map(b => `<span class="item"><span class="sw" style="background:${cssVar(b.css)};${b.key==='k'?'border:1.5px solid var(--accent)':''}"></span>${b.name}</span>`).join("") +
+  `<span class="item"><span class="sw" style="background:repeating-linear-gradient(45deg,#5f6c84 0 5px,#1c2536 5px 7px)"></span>专家判断（低共识）</span>
+   <span class="item"><span class="sw" style="background:repeating-linear-gradient(45deg,transparent 0 6px,var(--line) 6px 7px)"></span>无效格 N/A</span>`;
+
+/* 数据表 */
+let rows = `<tr><th>域</th><th>时间层</th><th>P</th><th>I</th><th>证据</th><th>R</th><th>说明</th></tr>`;
+DOMAINS.forEach(d => CELLS[d.id].forEach((c, t) => {
+  if (!c) return;
+  const r = cellR(c[0], c[1]);
+  rows += `<tr><td>${d.id} ${d.name}</td><td>${HORIZONS[t].name}</td><td>${c[0]}</td><td>${c[1]}</td><td>${["实测","模型","判断"][c[2]-1]}</td><td>${r.toFixed(1)}</td><td>${c[3]}</td></tr>`;
+}));
+document.getElementById("dataTable").innerHTML = rows;
+
+/* ================= 深时时间轴 ================= */
+const EVENTS = [
+  { y: -66e6,  label: "恐龙灭绝", note: "K-Pg 小行星撞击，约6600万年前——灭绝级事件的实证", up: true },
+  { y: -74e3,  label: "多巴超级火山", note: "约7.4万年前，人类一度仅存数千人", up: false },
+  { y: -1e4,   label: "农业文明起点", note: "约1万年前——人类文明的全部历史", up: true },
+  { y: -250,   label: "工业革命", note: "碳排放时代开启", up: false },
+  { y: -81,    label: "核时代", note: "1945年，人类首次拥有自灭绝手段", up: true },
+  { y: 10,     label: "1.5°C 节点", note: "升温突破巴黎协定下限（预计2030年代）", up: false },
+  { y: 50,     label: "珊瑚礁危机", note: "功能性灭绝风险窗口", up: true },
+  { y: 100,    label: "海平面上升", note: "多米级上升的世纪尺度", up: false, tier: 1 },
+  { y: 1e3,    label: "冰盖临界", note: "不可逆消融与核废料遗产", up: true },
+  { y: 5e4,    label: "下个冰期", note: "轨道周期的自然节律", up: false },
+  { y: 1e5,    label: "VEI-8 窗口", note: "多巴级超级火山统计复现", up: true },
+  { y: 1e9,    label: "海洋蒸发", note: "太阳亮度 +10%，地球过热", up: false },
+  { y: 5e9,    label: "红巨星", note: "太阳膨胀，地球的终极物理极限", up: true },
+];
+const svg = document.getElementById("timeline");
+const CX = 500, HALF = 460, AXIS_Y = 125, LOGMAX = 10;
+const xOf = y => CX + Math.sign(y) * HALF * (Math.log10(Math.max(1, Math.abs(y))) / LOGMAX);
+let s = `<line x1="${CX-HALF}" y1="${AXIS_Y}" x2="${CX+HALF}" y2="${AXIS_Y}" stroke="#24304a" stroke-width="2"/>`;
+// 刻度
+[-1e9,-1e6,-1e3,1e3,1e6,1e9].forEach(y => {
+  const x = xOf(y), lab = Math.abs(y) >= 1e9 ? "10亿年" : Math.abs(y) >= 1e6 ? "百万年" : "千年";
+  s += `<line x1="${x}" y1="${AXIS_Y-4}" x2="${x}" y2="${AXIS_Y+4}" stroke="#3a4a6b"/>
+        <text x="${x}" y="${AXIS_Y+22}" fill="#5f6c84" font-size="10" text-anchor="middle">${y<0?"-":"+"}${lab}</text>`;
+});
+// 现在
+s += `<line x1="${CX}" y1="${AXIS_Y-34}" x2="${CX}" y2="${AXIS_Y+34}" stroke="#ff5a4d" stroke-width="1.5"/>
+      <text x="${CX}" y="${AXIS_Y-42}" fill="#ff5a4d" font-size="12" font-weight="700" text-anchor="middle">现在</text>
+      <text x="${CX-HALF}" y="16" fill="#9aa7bd" font-size="11" text-anchor="start">← 过去（灭绝真实发生过）</text>
+      <text x="${CX+HALF}" y="16" fill="#9aa7bd" font-size="11" text-anchor="end">未来（预测节点） →</text>`;
+// 事件
+EVENTS.forEach(e => {
+  const x = xOf(e.y), past = e.y < 0;
+  const ly = e.up ? AXIS_Y - 58 - (e.tier ? 28 : 0) : AXIS_Y + 62 + (e.tier ? 28 : 0);
+  const color = past ? "#9aa7bd" : "#cfa32e";
+  s += `<g class="ev" data-tip-title="${e.label}" data-tip-meta="${past ? "约" + fmtY(-e.y) + "前" : "约" + fmtY(e.y) + "后"}" data-tip-note="${e.note}" style="cursor:default">
+    <line x1="${x}" y1="${AXIS_Y}" x2="${x}" y2="${e.up ? ly + 12 : ly - 22}" stroke="#3a4a6b" stroke-dasharray="2 3"/>
+    <circle cx="${x}" cy="${AXIS_Y}" r="5" fill="${color}" stroke="#0e1420" stroke-width="1.5"/>
+    <text x="${x}" y="${e.up ? ly : ly - 8}" fill="#e6ebf4" font-size="10.5" text-anchor="middle">${e.label}</text>
+    <text x="${x}" y="${e.up ? ly + 11 : ly + 3}" fill="#5f6c84" font-size="9" text-anchor="middle">${past ? "-" : "+"}${fmtY(Math.abs(e.y))}</text>
+  </g>`;
+});
+function fmtY(y) {
+  if (y >= 1e8) return (y/1e8) + "亿年";
+  if (y >= 1e4) return (y/1e4) + "万年";
+  return y + "年";
+}
+svg.innerHTML = s;
+
+/* ================= 悬停提示 ================= */
+const tip = document.getElementById("tip");
+function showTip(el, ev) {
+  tip.innerHTML = `<div class="t-title">${el.dataset.tipTitle}</div>
+    <div class="t-meta">${el.dataset.tipMeta}</div>
+    ${el.dataset.tipNote ? `<div class="t-note">${el.dataset.tipNote}</div>` : ""}`;
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + w > innerWidth - 8) x = ev.clientX - w - 14;
+  if (y + h > innerHeight - 8) y = ev.clientY - h - 14;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+document.addEventListener("mousemove", ev => {
+  const el = ev.target.closest("[data-tip-title]");
+  if (el) showTip(el, ev); else tip.style.display = "none";
+});
+</script>
+</body>
+</html>
